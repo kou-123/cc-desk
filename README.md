@@ -5,6 +5,7 @@
 Claude Code 桌面伴侣：历史会话、Workspace、供应商切换，一键在 macOS Terminal 启动或 Resume。
 
 [![macOS](https://img.shields.io/badge/platform-macOS-black)](https://github.com/kou-123/cc-desk)
+[![Release](https://img.shields.io/github/v/release/kou-123/cc-desk)](https://github.com/kou-123/cc-desk/releases/latest)
 [![Electron](https://img.shields.io/badge/Electron-35-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -12,6 +13,26 @@ Claude Code 桌面伴侣：历史会话、Workspace、供应商切换，一键�
 <p align="center">
   <img src="build/icons/preview.png" alt="CC Desk preview" width="720" />
 </p>
+
+---
+
+## Download（推荐）
+
+普通用户**不用拉代码**，直接下载安装包：
+
+➡️ **[Latest Release](https://github.com/kou-123/cc-desk/releases/latest)**
+
+| 文件 | 说明 |
+|------|------|
+| `CC Desk-*-arm64.dmg` | 拖进「应用程序」安装（Apple Silicon） |
+| `CC-Desk-*-mac-arm64.zip` | 解压即得 `CC Desk.app` |
+
+**打开提示：** 当前未做 Apple 公证签名。若提示「无法打开 / 已损坏」：
+
+1. 右键应用 → **打开** → 仍选择打开；或  
+2. 终端执行：`xattr -cr "/Applications/CC Desk.app"`
+
+还需本机已安装 **Claude Code** CLI（`claude` 命令可用）。
 
 ---
 
@@ -44,13 +65,15 @@ Claude Code 本身很强，但会话散落在 `~/.claude/projects`，多项目�
 
 ## Requirements
 
-- macOS（当前打包目标为 Apple Silicon / `mac-arm64`）
-- [Node.js](https://nodejs.org/) 18+
+- macOS（当前发布包为 **Apple Silicon / arm64**）
 - 已安装 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI（`claude` 在 PATH 中）
+- 从源码开发时另需 [Node.js](https://nodejs.org/) 18+
 
 ---
 
-## Quick start
+## Build from source（开发者）
+
+只想用软件 → 看上面的 [Download](#download推荐)。下面给改代码 / 自己打包用：
 
 ```bash
 git clone git@github.com:kou-123/cc-desk.git
@@ -59,27 +82,20 @@ npm install --ignore-scripts
 bash scripts/install-electron.sh   # 若 Electron 二进制缺失
 ```
 
-### 开发
-
 ```bash
-# 浏览器 + 本地 API
+# 浏览器 + 本地 API → http://127.0.0.1:5173
 npm run dev
-# → http://127.0.0.1:5173
 
-# 桌面窗口（Electron）
+# 桌面窗口
 npm run electron:dev
-```
 
-### 打包
-
-```bash
+# 打出 .app
 npm run electron:build
 # → release/mac-arm64/CC Desk.app
 
-npm run electron:dist   # 可选：生成 DMG
+# 打出 DMG（可上传到 GitHub Releases）
+npm run electron:dist
 ```
-
-首次打开若被 macOS 拦截：右键 → 打开，或拖到「应用程序」。
 
 ---
 
