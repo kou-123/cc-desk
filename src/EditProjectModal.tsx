@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Workspace } from './api'
 import { basename } from './lib'
 import { IconFolder } from './icons'
 import { isElectronApp, pickFolders } from './native'
 import { PathPicker } from './PathPicker'
+import { Tip } from './Tip'
 
 export type ProjectDraft = {
   id?: string
@@ -29,7 +30,6 @@ type Props = {
 
 export function EditProjectModal({
   initial,
-  knownRoots = [],
   startPicking = false,
   busy,
   onClose,
@@ -47,21 +47,6 @@ export function EditProjectModal({
   for (const d of addDirs) {
     if (d && d !== cwd) folders.push({ path: d, primary: false })
   }
-
-  const selected = useMemo(() => {
-    const set = new Set<string>()
-    if (cwd) set.add(cwd)
-    for (const d of addDirs) set.add(d)
-    return set
-  }, [cwd, addDirs])
-
-  const suggestions = useMemo(
-    () =>
-      knownRoots.filter(
-        (r) => r.path && !selected.has(r.path) && r.path !== cwd,
-      ),
-    [knownRoots, selected, cwd],
-  )
 
   const removeFolder = (path: string) => {
     if (path === cwd) {
@@ -170,18 +155,28 @@ export function EditProjectModal({
                 </div>
               )}
               {folders.map((f) => (
-                <div key={f.path} className="folder-row" title={f.path}>
+                <div key={f.path} className="folder-row">
                   <span className="ico">
                     <IconFolder />
                   </span>
-                  <button
-                    type="button"
-                    className="name linkish"
-                    onClick={() => makePrimary(f.path)}
-                    title="设为 Primary"
-                  >
-                    {basename(f.path)}
-                  </button>
+                  <div className="folder-meta">
+                    <button
+                      type="button"
+                      className="name linkish"
+                      onClick={() => makePrimary(f.path)}
+                      aria-label={`设为 Primary：${basename(f.path)}`}
+                    >
+                      {basename(f.path)}
+                    </button>
+                    <Tip
+                      label={f.path}
+                      side="bottom"
+                      delayMs={300}
+                      className="folder-path-tip"
+                    >
+                      <span className="path truncatable">{f.path}</span>
+                    </Tip>
+                  </div>
                   {f.primary ? (
                     <span className="badge">Primary</span>
                   ) : (
@@ -223,29 +218,6 @@ export function EditProjectModal({
               initialPath={cwd || '~/code_workspace/webstorm_workspace'}
               onPick={addFolder}
             />
-          )}
-
-          {suggestions.length > 0 && (
-            <div className="field">
-              <label>从已知项目添加</label>
-              <div className="suggest-list">
-                {suggestions.slice(0, 24).map((r) => (
-                  <button
-                    key={r.path}
-                    type="button"
-                    className="suggest-chip"
-                    title={r.path}
-                    onClick={() => addFolder(r.path)}
-                  >
-                    <span className="ico">
-                      <IconFolder size={14} />
-                    </span>
-                    <span>{r.label}</span>
-                    <span className="plus">+</span>
-                  </button>
-                ))}
-              </div>
-            </div>
           )}
         </div>
 

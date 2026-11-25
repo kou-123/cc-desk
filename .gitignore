@@ -8,3 +8,4 @@ release
 data/workspaces.json
 data/providers.json
 *.log
+.cc-desk-uploads

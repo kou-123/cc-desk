@@ -1,4 +1,5 @@
 import cors from 'cors'
+import { decidePermission, streamChat } from './chat.js'
 import express from 'express'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -11,6 +12,7 @@ import {
 } from './launch.js'
 import {
   deleteSession,
+  getSessionContextUsage,
   getSessionMessages,
   getSessionMeta,
   listSessions,
@@ -37,13 +39,32 @@ import {
   setProvidersFileFromWorkspaces,
   updateProvider,
 } from './providersStore.js'
-import { getClaudeCliInfo, launchClaudeUpdate } from './claudeCli.js'
+import {
+  getClaudeCliInfo,
+  launchClaudeUpdate,
+  resolveClaudeBin,
+} from './claudeCli.js'
+import {
+  addMcpServer,
+  createSkill,
+  deleteSkill,
+  getMcpServerDetail,
+  getMcpServerTools,
+  listMcpServers,
+  listSkills,
+  removeMcpServer,
+  updateMcpServer,
+} from './claudeExt.js'
 
 export function createApp({ staticDir } = {}) {
   const app = express()
 
   app.use(cors())
-  app.use(express.json({ limit: '2mb' }))
+  // Chat attachments are base64-encoded (images / PDFs / staged files).
+  app.use(express.json({ limit: '48mb' }))
+
+  app.post('/api/chat/permission', decidePermission)
+  app.post('/api/chat', streamChat)
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, home: os.homedir() })
@@ -146,6 +167,85 @@ export function createApp({ staticDir } = {}) {
     }
   })
 
+  /** Claude Code personal skills (~/.claude/skills) + plugin skills (read-only). */
+  app.get('/api/claude-skills', async (_req, res) => {
+    try {
+      res.json(await listSkills())
+    } catch (err) {
+      res.status(500).json({ error: String(err.message || err) })
+    }
+  })
+
+  app.post('/api/claude-skills', async (req, res) => {
+    try {
+      res.status(201).json(await createSkill(req.body || {}))
+    } catch (err) {
+      res.status(400).json({ error: String(err.message || err) })
+    }
+  })
+
+  app.delete('/api/claude-skills/:name', async (req, res) => {
+    try {
+      res.json(await deleteSkill(req.params.name))
+    } catch (err) {
+      res.status(400).json({ error: String(err.message || err) })
+    }
+  })
+
+  /** Claude Code MCP servers (user scope writable; local/project listed read-only). */
+  app.get('/api/claude-mcp', async (_req, res) => {
+    try {
+      res.json(await listMcpServers())
+    } catch (err) {
+      res.status(500).json({ error: String(err.message || err) })
+    }
+  })
+
+  app.get('/api/claude-mcp/:name', async (req, res) => {
+    try {
+      res.json(await getMcpServerDetail(req.params.name))
+    } catch (err) {
+      res.status(404).json({ error: String(err.message || err) })
+    }
+  })
+
+  app.get('/api/claude-mcp/:name/tools', async (req, res) => {
+    try {
+      res.json(
+        await getMcpServerTools(req.params.name, {
+          scope: req.query.scope,
+          projectPath: req.query.projectPath,
+        }),
+      )
+    } catch (err) {
+      res.status(400).json({ error: String(err.message || err) })
+    }
+  })
+
+  app.post('/api/claude-mcp', async (req, res) => {
+    try {
+      res.status(201).json(await addMcpServer(req.body || {}))
+    } catch (err) {
+      res.status(400).json({ error: String(err.message || err) })
+    }
+  })
+
+  app.put('/api/claude-mcp/:name', async (req, res) => {
+    try {
+      res.json(await updateMcpServer(req.params.name, req.body || {}))
+    } catch (err) {
+      res.status(400).json({ error: String(err.message || err) })
+    }
+  })
+
+  app.delete('/api/claude-mcp/:name', async (req, res) => {
+    try {
+      res.json(await removeMcpServer(req.params.name))
+    } catch (err) {
+      res.status(400).json({ error: String(err.message || err) })
+    }
+  })
+
   /** Serve cached transcript images (written under MEDIA_ROOT only). */
   app.get('/api/media/:sessionId/:file', (req, res) => {
     const sessionId = req.params.sessionId
@@ -182,6 +282,14 @@ export function createApp({ staticDir } = {}) {
       const meta = await getSessionMeta(req.params.id)
       if (!meta) return res.status(404).json({ error: 'Session not found' })
       res.json(meta)
+    } catch (err) {
+      res.status(500).json({ error: String(err.message || err) })
+    }
+  })
+
+  app.get('/api/sessions/:id/context', async (req, res) => {
+    try {
+      res.json(await getSessionContextUsage(req.params.id))
     } catch (err) {
       res.status(500).json({ error: String(err.message || err) })
     }
@@ -286,6 +394,8 @@ export function createApp({ staticDir } = {}) {
         files = [],
         name = null,
         workspaceId = null,
+        model = null,
+        permissionMode = null,
       } = req.body || {}
 
       let resolvedCwd = cwd
@@ -319,16 +429,28 @@ export function createApp({ staticDir } = {}) {
         (d) => path.resolve(d) !== path.resolve(resolvedCwd),
       )
 
+      const claudeBin = (await resolveClaudeBin()) || 'claude'
+      if (claudeBin === 'claude') {
+        return res.status(500).json({
+          error:
+            '未找到 claude 命令。请先安装 Claude Code，或在设置 → About 检查 PATH。',
+        })
+      }
+
       const commandParts = buildClaudeCommand({
         cwd: resolvedCwd,
         sessionId,
         addDirs: resolvedDirs,
         name: sessionId ? null : resolvedName,
+        model,
+        permissionMode,
+        claudeBin,
       })
 
       const result = await launchInTerminal({
         cwd: resolvedCwd,
         commandParts,
+        trustCwd: true,
       })
       res.json(result)
     } catch (err) {
@@ -423,7 +545,7 @@ export async function startServer({
   const listen = (p) =>
     new Promise((resolve, reject) => {
       const server = app.listen(p, host, () => {
-        resolve({ server, port: p, host })
+        resolve({ server, port: server.address().port, host })
       })
       server.on('error', reject)
     })

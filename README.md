@@ -1,8 +1,8 @@
 # CC Desk
 
-**Desktop companion for [Claude Code](https://docs.anthropic.com/en/docs/claude-code)** — browse sessions, manage workspaces, switch providers, and launch / resume chats in Terminal.
+**Desktop companion for [Claude Code](https://docs.anthropic.com/en/docs/claude-code)** — browse sessions, manage workspaces, switch providers, and chat with the local CLI directly in the panel.
 
-Claude Code 桌面伴侣：历史会话、Workspace、供应商切换，一键在 macOS Terminal 启动或 Resume。
+选择项目或历史会话即可在面板中提问，实时查看本地 Claude Code 的回复。Enter 发送，Shift+Enter 换行。
 
 [![macOS](https://img.shields.io/badge/platform-macOS-black)](https://github.com/kou-123/cc-desk)
 [![Release](https://img.shields.io/github/v/release/kou-123/cc-desk)](https://github.com/kou-123/cc-desk/releases/latest)
@@ -45,7 +45,7 @@ Claude Code 本身很强，但会话散落在 `~/.claude/projects`，多项目�
 | 找不到旧会话 | 按项目 / Recents 浏览，Markdown 预览 transcript |
 | 多目录协作麻烦 | Workspace + `--add-dir`，一键开聊 |
 | 供应商 / 模型来回改 | 本地 Provider 管理，写入 `~/.claude/settings.json` |
-| 只想继续上次 | Resume 拉起 Terminal，并自动同步预览 |
+| 只想继续上次 | 面板里直接续聊，或一键打开 macOS Terminal（带模型 / 信任目录） |
 
 适合日常用 Claude Code 的 macOS 用户，尤其是多仓库、多 API 线路的场景。
 
@@ -53,12 +53,13 @@ Claude Code 本身很强，但会话散落在 `~/.claude/projects`，多项目�
 
 ## Features
 
-- **Sessions** — 自动发现本机 Claude Code 会话，按项目树或 Recents 查看；支持删除、打开所在文件夹
-- **Transcript preview** — Markdown 渲染、折叠块、图片缩略图；Resume 后实时同步 Terminal 里的更新
-- **Workspaces** — 多文件夹项目（Primary + Add dirs），右键编辑，从已知项目一键并入
-- **Launch / Resume** — 在 Terminal.app 启动 `claude` 或 resume 指定会话
-- **Providers & models** — 本地 `providers.json` 优先；可从本机 CC Switch（`~/.cc-switch`）一次性合并导入；别名映射（Sonnet / Opus / Haiku 等）与 1M 上下文
-- **Settings** — 全页设置：Model、Claude Code 版本检测与一键更新指引
+- **Sessions** — 自动发现本机 Claude Code 会话；侧栏悬停可新建（`+`）/ 删除（`×`）；空会话直接删，有内容会确认
+- **Transcript preview** — Markdown 渲染、思考折叠、图片点击放大与复制；打开 Terminal 后可「终端预览同步」
+- **Workspaces** — 多文件夹项目（Primary + Add dirs），右键编辑；悬停 workspace 行的 `+` 可在该项目新建会话
+- **Chat** — 面板内提问 / 停止 / 续聊；粘贴或拖入图片与文件；权限模式（Ask / Accept edits / Auto / Plan）与模型选择
+- **Terminal launch** — 「打开 Claude Code 命令行」默认拉起 **macOS Terminal.app**，带上当前模型与权限模式，并自动信任工作目录
+- **Providers & models** — 本地 `providers.json`；可从本机 CC Switch（`~/.cc-switch`）合并导入；别名映射与 1M 上下文
+- **Settings** — Model、Skills（`~/.claude/skills`）、MCP（`~/.claude.json`，可展开看工具 / 编辑用户级条目）、Appearance 字号、About / CLI 更新
 - **UI** — 深色 / 浅色主题，侧栏搜索，截断路径 hover 提示
 
 ---
@@ -102,10 +103,11 @@ npm run electron:dist
 ## Usage
 
 1. 打开 **CC Desk**，左侧浏览 **Projects** 或底部切到 **Recents**
-2. 点选会话查看 transcript；需要继续时点 **Resume**（Terminal 启动，面板自动同步）
-3. **New chat** 选择项目 / Workspace 后开新会话
-4. 右键项目 → **Edit project** 管理 Source folders
-5. 齿轮进入 **Settings** → 管理 Provider、模型别名，或查看 Claude Code 版本
+2. 点选会话：可在底部输入框继续提问；需要完整 TUI 时点 **打开 Claude Code 命令行**
+3. **New chat**，或悬停 workspace 行的 **`+`**，在对应项目下新建会话
+4. 悬停会话行的 **`×`** 删除会话（空会话直接删）
+5. 右键项目 → **Edit project** 管理 Source folders
+6. 齿轮 → **Settings**：Provider / 模型、Skills、MCP、字号、Claude Code 版本
 
 ---
 

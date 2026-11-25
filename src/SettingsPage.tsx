@@ -2,12 +2,26 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   api,
   type ClaudeCliInfo,
+  type ClaudeMcpServer,
+  type ClaudeMcpTool,
   type ClaudeModelMapping,
   type ClaudeProvider,
   type ClaudeProviderInput,
   type ClaudeSettings,
+  type ClaudeSkill,
 } from './api'
 import { ConfirmDialog } from './ConfirmDialog'
+import {
+  applyFontScale,
+  FONT_PX_DEFAULT,
+  FONT_PX_MAX,
+  FONT_PX_MIN,
+  FONT_SCALE_OPTIONS,
+  formatFontPx,
+  readFontPx,
+  readFontScale,
+  type FontScaleId,
+} from './fontScale'
 
 const DEFAULT_UPDATE_CMD =
   'npm install -g @anthropic-ai/claude-code@latest'
@@ -18,7 +32,7 @@ type Props = {
   onToast: (msg: string, error?: boolean) => void
 }
 
-type TabId = 'model' | 'about'
+type TabId = 'model' | 'skills' | 'mcp' | 'appearance' | 'about'
 
 const emptyMapping: ClaudeModelMapping = {
   anthropicModel: '',
@@ -79,6 +93,9 @@ function blankDraft(
 
 const NAV: { id: TabId; label: string; group: string }[] = [
   { id: 'model', label: 'Model', group: 'Claude Code' },
+  { id: 'skills', label: 'Skills', group: 'Claude Code' },
+  { id: 'mcp', label: 'MCP', group: 'Claude Code' },
+  { id: 'appearance', label: 'Appearance', group: 'App' },
   { id: 'about', label: 'About', group: 'App' },
 ]
 
@@ -213,6 +230,87 @@ export function SettingsPage({ busy, onClose, onToast }: Props) {
   const [pendingDelete, setPendingDelete] = useState<ClaudeProvider | null>(null)
   const [cli, setCli] = useState<ClaudeCliInfo | null>(null)
   const [updateOpen, setUpdateOpen] = useState(false)
+  const [fontScale, setFontScale] = useState<FontScaleId>(() => readFontScale())
+  const [fontPx, setFontPx] = useState(() => readFontPx())
+  const [fontPxDraft, setFontPxDraft] = useState(() => String(readFontPx()))
+  const [skills, setSkills] = useState<ClaudeSkill[]>([])
+  const [skillsDir, setSkillsDir] = useState('')
+  const [mcpServers, setMcpServers] = useState<ClaudeMcpServer[]>([])
+  const [mcpPath, setMcpPath] = useState('')
+  const [skillDraft, setSkillDraft] = useState({
+    name: '',
+    description: '',
+    body: '',
+  })
+  const [mcpDraft, setMcpDraft] = useState({
+    name: '',
+    transport: 'http' as 'http' | 'sse' | 'stdio',
+    url: '',
+    command: '',
+    argsText: '',
+    headerAuth: '',
+  })
+  const [mcpExpandedId, setMcpExpandedId] = useState<string | null>(null)
+  const [mcpToolsById, setMcpToolsById] = useState<
+    Record<
+      string,
+      {
+        loading?: boolean
+        error?: string
+        tools?: ClaudeMcpTool[]
+        toolCount?: number
+        serverInfo?: { name?: string; version?: string } | null
+      }
+    >
+  >({})
+  const [mcpEditingId, setMcpEditingId] = useState<string | null>(null)
+  const [mcpEditDraft, setMcpEditDraft] = useState({
+    name: '',
+    transport: 'http' as 'http' | 'sse' | 'stdio',
+    url: '',
+    command: '',
+    argsText: '',
+    headerAuth: '',
+  })
+  const [extBusy, setExtBusy] = useState(false)
+
+  // Re-sync from storage whenever Appearance is shown (settings remount / tab switch).
+  useEffect(() => {
+    if (tab !== 'appearance') return
+    const px = readFontPx()
+    const id = readFontScale()
+    setFontPx(px)
+    setFontPxDraft(String(px))
+    setFontScale(id)
+    applyFontScale(id, px)
+  }, [tab])
+
+  useEffect(() => {
+    if (tab !== 'skills' && tab !== 'mcp') return
+    let cancelled = false
+    ;(async () => {
+      try {
+        if (tab === 'skills') {
+          const res = await api.claudeSkills()
+          if (cancelled) return
+          setSkills(res.skills || [])
+          setSkillsDir(res.skillsDir || '')
+        } else {
+          const res = await api.claudeMcp()
+          if (cancelled) return
+          setMcpServers(res.servers || [])
+          setMcpPath(res.claudeJsonPath || '')
+        }
+      } catch (e) {
+        if (!cancelled) {
+          onToast(e instanceof Error ? e.message : String(e), true)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [tab, onToast])
 
   const applyProvidersResponse = (
     prov: Awaited<ReturnType<typeof api.claudeProviders>>,
@@ -468,11 +566,265 @@ export function SettingsPage({ busy, onClose, onToast }: Props) {
     }
   }
 
-  const title = tab === 'model' ? 'Model' : 'About'
+  const title =
+    tab === 'model'
+      ? 'Model'
+      : tab === 'skills'
+        ? 'Skills'
+        : tab === 'mcp'
+          ? 'MCP'
+          : tab === 'appearance'
+            ? 'Appearance'
+            : 'About'
   const subtitle =
     tab === 'model'
       ? '供应商保存在本地；编辑可改连接与模型映射，切换即写入 Claude Code。'
-      : '配置文件位置与来源。'
+      : tab === 'skills'
+        ? 'Personal skills live in ~/.claude/skills (same as Claude Code). Plugin skills are listed read-only.'
+        : tab === 'mcp'
+          ? 'User-scoped MCP servers are stored in ~/.claude.json. Project/local entries are shown read-only.'
+          : tab === 'appearance'
+            ? 'Adjust UI font size. Changes apply immediately and are remembered.'
+            : '配置文件位置与来源。'
+
+  async function submitSkill() {
+    const name = skillDraft.name.trim()
+    if (!name) {
+      onToast('Skill name is required', true)
+      return
+    }
+    setExtBusy(true)
+    try {
+      const res = await api.createClaudeSkill({
+        name,
+        description: skillDraft.description.trim(),
+        body: skillDraft.body,
+      })
+      setSkills(res.skills || [])
+      setSkillsDir(res.skillsDir || skillsDir)
+      setSkillDraft({ name: '', description: '', body: '' })
+      onToast(`Skill added: ${name}`)
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setExtBusy(false)
+    }
+  }
+
+  async function removeSkill(s: ClaudeSkill) {
+    if (!s.editable) return
+    setExtBusy(true)
+    try {
+      const res = await api.deleteClaudeSkill(s.id)
+      setSkills(res.skills || [])
+      onToast(`Skill removed: ${s.name}`)
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setExtBusy(false)
+    }
+  }
+
+  async function submitMcp() {
+    const name = mcpDraft.name.trim()
+    if (!name) {
+      onToast('MCP name is required', true)
+      return
+    }
+    setExtBusy(true)
+    try {
+      const headers: Record<string, string> = {}
+      const auth = mcpDraft.headerAuth.trim()
+      if (auth) {
+        headers.Authorization = auth.startsWith('Bearer ')
+          ? auth
+          : `Bearer ${auth}`
+      }
+      const res = await api.createClaudeMcp({
+        name,
+        transport: mcpDraft.transport,
+        url: mcpDraft.url.trim(),
+        command: mcpDraft.command.trim(),
+        argsText: mcpDraft.argsText.trim(),
+        headers: Object.keys(headers).length ? headers : undefined,
+      })
+      setMcpServers(res.servers || [])
+      setMcpPath(res.claudeJsonPath || mcpPath)
+      setMcpDraft({
+        name: '',
+        transport: 'http',
+        url: '',
+        command: '',
+        argsText: '',
+        headerAuth: '',
+      })
+      onToast(`MCP added: ${name}`)
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setExtBusy(false)
+    }
+  }
+
+  async function removeMcp(s: ClaudeMcpServer) {
+    if (!s.editable) return
+    setExtBusy(true)
+    try {
+      const res = await api.deleteClaudeMcp(s.name)
+      setMcpServers(res.servers || [])
+      setMcpExpandedId((id) => (id === s.id ? null : id))
+      setMcpEditingId((id) => (id === s.id ? null : id))
+      setMcpToolsById((prev) => {
+        const next = { ...prev }
+        delete next[s.id]
+        return next
+      })
+      onToast(`MCP removed: ${s.name}`)
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setExtBusy(false)
+    }
+  }
+
+  async function loadMcpTools(s: ClaudeMcpServer, { force = false } = {}) {
+    const cached = mcpToolsById[s.id]
+    if (!force && (cached?.tools || cached?.loading)) return
+    setMcpToolsById((prev) => ({
+      ...prev,
+      [s.id]: { ...prev[s.id], loading: true, error: undefined },
+    }))
+    try {
+      const res = await api.claudeMcpTools(s.name, {
+        scope: s.scope,
+        projectPath: s.projectPath,
+      })
+      setMcpToolsById((prev) => ({
+        ...prev,
+        [s.id]: {
+          loading: false,
+          tools: res.tools || [],
+          toolCount: res.toolCount ?? res.tools?.length ?? 0,
+          serverInfo: res.serverInfo,
+        },
+      }))
+    } catch (e) {
+      setMcpToolsById((prev) => ({
+        ...prev,
+        [s.id]: {
+          loading: false,
+          error: e instanceof Error ? e.message : String(e),
+          tools: prev[s.id]?.tools,
+          toolCount: prev[s.id]?.toolCount,
+        },
+      }))
+    }
+  }
+
+  function toggleMcpExpand(s: ClaudeMcpServer) {
+    setMcpExpandedId((cur) => {
+      const next = cur === s.id ? null : s.id
+      if (next === s.id) void loadMcpTools(s)
+      return next
+    })
+  }
+
+  async function startEditMcp(s: ClaudeMcpServer) {
+    if (!s.editable) return
+    setMcpExpandedId(s.id)
+    setMcpEditingId(s.id)
+    setMcpEditDraft({
+      name: s.name,
+      transport: (['http', 'sse', 'stdio'].includes(s.type)
+        ? s.type
+        : 'http') as 'http' | 'sse' | 'stdio',
+      url: s.url || '',
+      command: s.command || '',
+      argsText: (s.args || []).join(' '),
+      headerAuth: s.hasAuthorization ? 'Bearer ••••••••' : '',
+    })
+    void loadMcpTools(s)
+    try {
+      const detail = await api.claudeMcpDetail(s.name)
+      if (detail.headerAuth) {
+        setMcpEditDraft((d) => ({ ...d, headerAuth: detail.headerAuth }))
+      }
+    } catch {
+      /* keep local draft */
+    }
+  }
+
+  async function saveEditMcp(s: ClaudeMcpServer) {
+    if (!s.editable || mcpEditingId !== s.id) return
+    const name = mcpEditDraft.name.trim()
+    if (!name) {
+      onToast('MCP name is required', true)
+      return
+    }
+    setExtBusy(true)
+    try {
+      const headers: Record<string, string> = {}
+      const auth = mcpEditDraft.headerAuth.trim()
+      if (auth && !/[•…]/.test(auth)) {
+        headers.Authorization = auth.startsWith('Bearer ')
+          ? auth
+          : `Bearer ${auth}`
+      } else if (auth && /[•…]/.test(auth)) {
+        // keep existing secret server-side
+        headers.Authorization = auth
+      }
+      const res = await api.updateClaudeMcp(s.name, {
+        name,
+        transport: mcpEditDraft.transport,
+        url: mcpEditDraft.url.trim(),
+        command: mcpEditDraft.command.trim(),
+        argsText: mcpEditDraft.argsText.trim(),
+        headers: Object.keys(headers).length ? headers : undefined,
+      })
+      setMcpServers(res.servers || [])
+      setMcpEditingId(null)
+      const next = (res.servers || []).find(
+        (x) => x.scope === 'user' && x.name === name,
+      )
+      if (next) {
+        setMcpExpandedId(next.id)
+        setMcpToolsById((prev) => {
+          const copy = { ...prev }
+          delete copy[s.id]
+          return copy
+        })
+        void loadMcpTools(next, { force: true })
+      }
+      onToast(`MCP updated: ${name}`)
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setExtBusy(false)
+    }
+  }
+
+  function pickFontScale(id: Exclude<FontScaleId, 'custom'>) {
+    const preset = FONT_SCALE_OPTIONS.find((o) => o.id === id)
+    const next = applyFontScale(id, preset?.px)
+    setFontScale(next.id)
+    setFontPx(next.px)
+    setFontPxDraft(String(next.px))
+    onToast(`Font size: ${preset?.label || id} (${next.px}px)`)
+  }
+
+  function commitFontPx(raw: string) {
+    const parsed = Number(String(raw).replace(/px$/i, '').trim())
+    if (!Number.isFinite(parsed)) {
+      setFontPxDraft(String(fontPx || FONT_PX_DEFAULT))
+      onToast('Enter a number in px', true)
+      return
+    }
+    const next = applyFontScale('custom', parsed)
+    setFontScale(next.id)
+    setFontPx(next.px)
+    setFontPxDraft(String(next.px))
+    onToast(`Font size saved: ${next.px}px`)
+  }
 
   return (
     <div className="settings-page" role="region" aria-label="Settings">
@@ -518,6 +870,602 @@ export function SettingsPage({ busy, onClose, onToast }: Props) {
           <div className="settings-loading">读取配置中…</div>
         ) : (
           <div className="settings-panel settings-panel-wide">
+            {tab === 'skills' ? (
+              <div className="ext-panel">
+                <div className="settings-rows">
+                  <div className="settings-row">
+                    <div className="settings-row-copy">
+                      <div className="settings-row-label">Skills directory</div>
+                      <div className="settings-row-desc">
+                        Writable user skills · plugin skills are read-only
+                      </div>
+                    </div>
+                    <div className="settings-row-value mono" title={skillsDir}>
+                      {skillsDir || '~/.claude/skills'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="ext-form">
+                  <div className="ext-form-title">Add personal skill</div>
+                  <div className="ext-form-grid">
+                    <label className="ext-field">
+                      <span>Name</span>
+                      <input
+                        value={skillDraft.name}
+                        placeholder="my-skill"
+                        disabled={extBusy || busy}
+                        onChange={(e) =>
+                          setSkillDraft((d) => ({ ...d, name: e.target.value }))
+                        }
+                      />
+                    </label>
+                    <label className="ext-field">
+                      <span>Description</span>
+                      <input
+                        value={skillDraft.description}
+                        placeholder="When should Claude use this skill?"
+                        disabled={extBusy || busy}
+                        onChange={(e) =>
+                          setSkillDraft((d) => ({
+                            ...d,
+                            description: e.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                  <label className="ext-field">
+                    <span>SKILL.md body</span>
+                    <textarea
+                      rows={5}
+                      value={skillDraft.body}
+                      placeholder="# Instructions&#10;&#10;Write the workflow here…"
+                      disabled={extBusy || busy}
+                      onChange={(e) =>
+                        setSkillDraft((d) => ({ ...d, body: e.target.value }))
+                      }
+                    />
+                  </label>
+                  <div className="ext-form-actions">
+                    <button
+                      type="button"
+                      className="btn primary"
+                      disabled={extBusy || busy || !skillDraft.name.trim()}
+                      onClick={() => void submitSkill()}
+                    >
+                      Add skill
+                    </button>
+                  </div>
+                </div>
+
+                <div className="ext-list" role="list">
+                  {skills.length === 0 ? (
+                    <div className="settings-empty">
+                      No skills found. Add one above, or create folders under
+                      ~/.claude/skills.
+                    </div>
+                  ) : (
+                    skills.map((s) => (
+                      <div key={s.id} className="ext-item" role="listitem">
+                        <div className="ext-item-main">
+                          <div className="ext-item-title">
+                            <span className="ext-item-name">/{s.name}</span>
+                            <span
+                              className={`ext-badge scope-${s.scope}`}
+                            >
+                              {s.scope}
+                            </span>
+                          </div>
+                          <div className="ext-item-desc">
+                            {s.description || s.preview || s.path}
+                          </div>
+                          {s.plugin ? (
+                            <div className="ext-item-meta">{s.plugin}</div>
+                          ) : null}
+                        </div>
+                        {s.editable ? (
+                          <button
+                            type="button"
+                            className="btn danger"
+                            disabled={extBusy || busy}
+                            onClick={() => void removeSkill(s)}
+                          >
+                            Delete
+                          </button>
+                        ) : (
+                          <span className="ext-item-ro">Read-only</span>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {tab === 'mcp' ? (
+              <div className="ext-panel">
+                <div className="settings-rows">
+                  <div className="settings-row">
+                    <div className="settings-row-copy">
+                      <div className="settings-row-label">Claude config</div>
+                      <div className="settings-row-desc">
+                        User MCP servers · same file as `claude mcp`
+                      </div>
+                    </div>
+                    <div className="settings-row-value mono" title={mcpPath}>
+                      {mcpPath || '~/.claude.json'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="ext-form">
+                  <div className="ext-form-title">Add user MCP server</div>
+                  <div className="ext-form-grid">
+                    <label className="ext-field">
+                      <span>Name</span>
+                      <input
+                        value={mcpDraft.name}
+                        placeholder="my-server"
+                        disabled={extBusy || busy}
+                        onChange={(e) =>
+                          setMcpDraft((d) => ({ ...d, name: e.target.value }))
+                        }
+                      />
+                    </label>
+                    <label className="ext-field">
+                      <span>Transport</span>
+                      <select
+                        value={mcpDraft.transport}
+                        disabled={extBusy || busy}
+                        onChange={(e) =>
+                          setMcpDraft((d) => ({
+                            ...d,
+                            transport: e.target.value as
+                              | 'http'
+                              | 'sse'
+                              | 'stdio',
+                          }))
+                        }
+                      >
+                        <option value="http">HTTP</option>
+                        <option value="sse">SSE</option>
+                        <option value="stdio">stdio</option>
+                      </select>
+                    </label>
+                  </div>
+                  {mcpDraft.transport === 'stdio' ? (
+                    <div className="ext-form-grid">
+                      <label className="ext-field">
+                        <span>Command</span>
+                        <input
+                          value={mcpDraft.command}
+                          placeholder="npx"
+                          disabled={extBusy || busy}
+                          onChange={(e) =>
+                            setMcpDraft((d) => ({
+                              ...d,
+                              command: e.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="ext-field">
+                        <span>Args</span>
+                        <input
+                          value={mcpDraft.argsText}
+                          placeholder="-y @modelcontextprotocol/server-filesystem /tmp"
+                          disabled={extBusy || busy}
+                          onChange={(e) =>
+                            setMcpDraft((d) => ({
+                              ...d,
+                              argsText: e.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="ext-form-grid">
+                      <label className="ext-field">
+                        <span>URL</span>
+                        <input
+                          value={mcpDraft.url}
+                          placeholder="https://example.com/mcp"
+                          disabled={extBusy || busy}
+                          onChange={(e) =>
+                            setMcpDraft((d) => ({
+                              ...d,
+                              url: e.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="ext-field">
+                        <span>Authorization (optional)</span>
+                        <input
+                          value={mcpDraft.headerAuth}
+                          placeholder="Bearer …"
+                          disabled={extBusy || busy}
+                          onChange={(e) =>
+                            setMcpDraft((d) => ({
+                              ...d,
+                              headerAuth: e.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  )}
+                  <div className="ext-form-actions">
+                    <button
+                      type="button"
+                      className="btn primary"
+                      disabled={extBusy || busy || !mcpDraft.name.trim()}
+                      onClick={() => void submitMcp()}
+                    >
+                      Add MCP
+                    </button>
+                  </div>
+                </div>
+
+                <div className="ext-list" role="list">
+                  {mcpServers.length === 0 ? (
+                    <div className="settings-empty">
+                      No MCP servers found. Add a user-scoped server above.
+                    </div>
+                  ) : (
+                    mcpServers.map((s) => {
+                      const open = mcpExpandedId === s.id
+                      const editing = mcpEditingId === s.id
+                      const toolsState = mcpToolsById[s.id]
+                      return (
+                        <div
+                          key={s.id}
+                          className={`ext-item mcp-item${open ? ' open' : ''}`}
+                          role="listitem"
+                        >
+                          <div className="mcp-item-head">
+                            <button
+                              type="button"
+                              className="mcp-item-toggle"
+                              aria-expanded={open}
+                              onClick={() => toggleMcpExpand(s)}
+                            >
+                              <span className="mcp-chevron" aria-hidden>
+                                {open ? '▾' : '▸'}
+                              </span>
+                              <span className="ext-item-main">
+                                <span className="ext-item-title">
+                                  <span className="ext-item-name">{s.name}</span>
+                                  <span
+                                    className={`ext-badge scope-${s.scope}`}
+                                  >
+                                    {s.scope}
+                                  </span>
+                                  <span className="ext-badge type">
+                                    {s.type}
+                                  </span>
+                                  {typeof toolsState?.toolCount === 'number' ? (
+                                    <span className="ext-badge tools">
+                                      {toolsState.toolCount} tools
+                                    </span>
+                                  ) : null}
+                                </span>
+                                <span className="ext-item-desc mono">
+                                  {s.type === 'stdio'
+                                    ? [s.command, ...(s.args || [])].join(' ')
+                                    : s.url || '—'}
+                                </span>
+                                {s.projectPath ? (
+                                  <span
+                                    className="ext-item-meta"
+                                    title={s.projectPath}
+                                  >
+                                    {s.projectPath}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </button>
+                            <div className="mcp-item-actions">
+                              {s.editable ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    disabled={extBusy || busy}
+                                    onClick={() => void startEditMcp(s)}
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn danger"
+                                    disabled={extBusy || busy}
+                                    onClick={() => void removeMcp(s)}
+                                  >
+                                    Delete
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="ext-item-ro">Read-only</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {open ? (
+                            <div className="mcp-item-body">
+                              {editing ? (
+                                <div className="ext-form mcp-edit-form">
+                                  <div className="ext-form-title">
+                                    Edit {s.name}
+                                  </div>
+                                  <div className="ext-form-grid">
+                                    <label className="ext-field">
+                                      <span>Name</span>
+                                      <input
+                                        value={mcpEditDraft.name}
+                                        disabled={extBusy || busy}
+                                        onChange={(e) =>
+                                          setMcpEditDraft((d) => ({
+                                            ...d,
+                                            name: e.target.value,
+                                          }))
+                                        }
+                                      />
+                                    </label>
+                                    <label className="ext-field">
+                                      <span>Transport</span>
+                                      <select
+                                        value={mcpEditDraft.transport}
+                                        disabled={extBusy || busy}
+                                        onChange={(e) =>
+                                          setMcpEditDraft((d) => ({
+                                            ...d,
+                                            transport: e.target.value as
+                                              | 'http'
+                                              | 'sse'
+                                              | 'stdio',
+                                          }))
+                                        }
+                                      >
+                                        <option value="http">HTTP</option>
+                                        <option value="sse">SSE</option>
+                                        <option value="stdio">stdio</option>
+                                      </select>
+                                    </label>
+                                  </div>
+                                  {mcpEditDraft.transport === 'stdio' ? (
+                                    <div className="ext-form-grid">
+                                      <label className="ext-field">
+                                        <span>Command</span>
+                                        <input
+                                          value={mcpEditDraft.command}
+                                          disabled={extBusy || busy}
+                                          onChange={(e) =>
+                                            setMcpEditDraft((d) => ({
+                                              ...d,
+                                              command: e.target.value,
+                                            }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="ext-field">
+                                        <span>Args</span>
+                                        <input
+                                          value={mcpEditDraft.argsText}
+                                          disabled={extBusy || busy}
+                                          onChange={(e) =>
+                                            setMcpEditDraft((d) => ({
+                                              ...d,
+                                              argsText: e.target.value,
+                                            }))
+                                          }
+                                        />
+                                      </label>
+                                    </div>
+                                  ) : (
+                                    <div className="ext-form-grid">
+                                      <label className="ext-field">
+                                        <span>URL</span>
+                                        <input
+                                          value={mcpEditDraft.url}
+                                          disabled={extBusy || busy}
+                                          onChange={(e) =>
+                                            setMcpEditDraft((d) => ({
+                                              ...d,
+                                              url: e.target.value,
+                                            }))
+                                          }
+                                        />
+                                      </label>
+                                      <label className="ext-field">
+                                        <span>
+                                          Authorization
+                                          {s.hasAuthorization
+                                            ? ' (leave masked to keep)'
+                                            : ' (optional)'}
+                                        </span>
+                                        <input
+                                          value={mcpEditDraft.headerAuth}
+                                          placeholder="Bearer …"
+                                          disabled={extBusy || busy}
+                                          onChange={(e) =>
+                                            setMcpEditDraft((d) => ({
+                                              ...d,
+                                              headerAuth: e.target.value,
+                                            }))
+                                          }
+                                        />
+                                      </label>
+                                    </div>
+                                  )}
+                                  <div className="ext-form-actions">
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      disabled={extBusy || busy}
+                                      onClick={() => setMcpEditingId(null)}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn primary"
+                                      disabled={
+                                        extBusy ||
+                                        busy ||
+                                        !mcpEditDraft.name.trim()
+                                      }
+                                      onClick={() => void saveEditMcp(s)}
+                                    >
+                                      Save
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              <div className="mcp-tools">
+                                <div className="mcp-tools-head">
+                                  <span className="mcp-tools-title">
+                                    Tools
+                                    {typeof toolsState?.toolCount ===
+                                    'number'
+                                      ? ` · ${toolsState.toolCount}`
+                                      : ''}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn ghost small"
+                                    disabled={Boolean(toolsState?.loading)}
+                                    onClick={() =>
+                                      void loadMcpTools(s, { force: true })
+                                    }
+                                  >
+                                    {toolsState?.loading
+                                      ? 'Loading…'
+                                      : 'Refresh'}
+                                  </button>
+                                </div>
+                                {toolsState?.error ? (
+                                  <div className="mcp-tools-error">
+                                    {toolsState.error}
+                                  </div>
+                                ) : null}
+                                {toolsState?.loading &&
+                                !toolsState.tools?.length ? (
+                                  <div className="mcp-tools-empty">
+                                    Connecting to MCP…
+                                  </div>
+                                ) : null}
+                                {toolsState?.tools?.length ? (
+                                  <ul className="mcp-tools-list">
+                                    {toolsState.tools.map((t) => (
+                                      <li key={t.name}>
+                                        <div className="mcp-tool-name">
+                                          {t.name}
+                                        </div>
+                                        {t.description ? (
+                                          <div className="mcp-tool-desc">
+                                            {t.description}
+                                          </div>
+                                        ) : null}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : !toolsState?.loading &&
+                                  !toolsState?.error ? (
+                                  <div className="mcp-tools-empty">
+                                    No tools reported.
+                                  </div>
+                                ) : null}
+                                {toolsState?.serverInfo?.name ? (
+                                  <div className="mcp-tools-meta">
+                                    Server · {toolsState.serverInfo.name}
+                                    {toolsState.serverInfo.version
+                                      ? ` ${toolsState.serverInfo.version}`
+                                      : ''}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {tab === 'appearance' ? (
+              <div className="settings-rows">
+                <div className="settings-row stack">
+                  <div className="settings-row-copy">
+                    <div className="settings-row-label">Font size</div>
+                    <div className="settings-row-desc">
+                      Scales sidebar, chat, and settings text. Range{' '}
+                      {FONT_PX_MIN}–{FONT_PX_MAX}px.
+                    </div>
+                  </div>
+                  <div
+                    className="font-scale-options"
+                    role="radiogroup"
+                    aria-label="Font size presets"
+                  >
+                    {FONT_SCALE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={fontScale === opt.id}
+                        className={`font-scale-option${
+                          fontScale === opt.id ? ' active' : ''
+                        }`}
+                        onClick={() => pickFontScale(opt.id)}
+                      >
+                        <span className="font-scale-label">{opt.label}</span>
+                        <span className="font-scale-hint">{opt.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="font-scale-input-row">
+                    <label className="font-scale-input-label" htmlFor="font-px">
+                      Custom
+                    </label>
+                    <div className="font-scale-input-wrap">
+                      <input
+                        id="font-px"
+                        type="number"
+                        className="font-scale-input"
+                        min={FONT_PX_MIN}
+                        max={FONT_PX_MAX}
+                        step={1}
+                        value={fontPxDraft}
+                        aria-label="Font size in pixels"
+                        onChange={(e) => setFontPxDraft(e.target.value)}
+                        onBlur={() => commitFontPx(fontPxDraft)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            commitFontPx(fontPxDraft)
+                            ;(e.target as HTMLInputElement).blur()
+                          }
+                        }}
+                      />
+                      <span className="font-scale-input-suffix">px</span>
+                    </div>
+                    <span className="font-scale-value">
+                      {formatFontPx(fontPx)}
+                    </span>
+                  </div>
+                  <p className="font-scale-preview" aria-hidden>
+                    Preview: Ask Claude… Aa sample 123
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
             {tab === 'model' ? (
               <>
                 <div className="settings-rows">

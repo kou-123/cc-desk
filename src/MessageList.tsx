@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 import { Markdown } from './Markdown'
+import { copyImageFromUrl } from './native'
 
 export type ChatTool = {
   name: string
@@ -12,6 +19,7 @@ export type ChatBlock = {
   role: string
   text?: string
   images?: string[]
+  files?: { name: string; kind: string }[]
   label?: string
   thinking?: string[]
   tools?: ChatTool[]
@@ -102,6 +110,13 @@ type Props = {
 type ImgMenu = { x: number; y: number; src: string }
 
 async function copyImageToClipboard(src: string) {
+  // Prefer Electron native clipboard when available (more reliable for images).
+  try {
+    await copyImageFromUrl(src)
+    return
+  } catch {
+    /* fall through to web clipboard */
+  }
   const res = await fetch(src)
   if (!res.ok) throw new Error('无法读取图片')
   let blob = await res.blob()
@@ -154,8 +169,8 @@ function ImageLightbox({
       onClick={onClose}
     >
       <div className="img-lightbox-bar" onClick={(e) => e.stopPropagation()}>
-        <button type="button" className="btn" onClick={() => onCopy(src)}>
-          Copy image
+        <button type="button" className="btn primary" onClick={() => onCopy(src)}>
+          复制图片
         </button>
         <button type="button" className="btn" onClick={onClose}>
           关闭
@@ -223,13 +238,13 @@ function ImageThumbs({
 }: {
   images: string[]
   onPreview: (src: string) => void
-  onMenu: (e: React.MouseEvent, src: string) => void
+  onMenu: (e: ReactMouseEvent, src: string) => void
 }) {
   return (
     <div className="msg-images">
       {images.map((src, ii) => (
         <button
-          key={ii}
+          key={`${src}-${ii}`}
           type="button"
           className="msg-thumb"
           title="点击放大 · 右键复制"
@@ -238,7 +253,7 @@ function ImageThumbs({
         >
           <img
             src={src}
-            alt={`Image ${ii + 1}`}
+            alt={`图片 ${ii + 1}`}
             className="msg-thumb-img"
             loading="lazy"
             draggable={false}
@@ -279,7 +294,7 @@ export function MessageList({ messages, onToast }: Props) {
     }
   }, [menu])
 
-  const openMenu = (e: React.MouseEvent, src: string) => {
+  const openMenu = (e: ReactMouseEvent, src: string) => {
     e.preventDefault()
     e.stopPropagation()
     setMenu({ x: e.clientX, y: e.clientY, src })
@@ -304,6 +319,15 @@ export function MessageList({ messages, onToast }: Props) {
                     onPreview={setPreview}
                     onMenu={openMenu}
                   />
+                ) : null}
+                {m.files && m.files.length > 0 ? (
+                  <div className="msg-files">
+                    {m.files.map((f, fi) => (
+                      <span key={fi} className="msg-file-chip" title={f.name}>
+                        {f.kind === 'document' ? 'PDF' : '文件'} · {f.name}
+                      </span>
+                    ))}
+                  </div>
                 ) : null}
                 {m.text ? <div className="msg-plain">{m.text}</div> : null}
               </div>
@@ -357,19 +381,19 @@ export function MessageList({ messages, onToast }: Props) {
           <button
             type="button"
             className="ctx-item"
-            onClick={() => void copyImage(menu.src)}
-          >
-            Copy image
-          </button>
-          <button
-            type="button"
-            className="ctx-item"
             onClick={() => {
               setPreview(menu.src)
               setMenu(null)
             }}
           >
             放大查看
+          </button>
+          <button
+            type="button"
+            className="ctx-item"
+            onClick={() => void copyImage(menu.src)}
+          >
+            复制图片
           </button>
         </div>
       ) : null}

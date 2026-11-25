@@ -117,12 +117,18 @@ export function WorkspacesView({ workspaces, onChange, onToast }: Props) {
         setSelectedId(workspace.id)
         workspaceId = workspace.id
       }
+      const { readLaunchPrefs, permissionModeToCli } = await import(
+        './launchPrefs'
+      )
+      const prefs = readLaunchPrefs()
       const result = await api.launch({
         workspaceId,
         cwd: draft.cwd || null,
         addDirs: draft.addDirs,
         files: draft.files,
         name: draft.name,
+        model: prefs.model,
+        permissionMode: permissionModeToCli(prefs.permissionMode),
       })
       onToast(`已启动：${result.command}`)
     } catch (e) {

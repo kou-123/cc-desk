@@ -52,6 +52,14 @@ export const api = {
       mtimeMs: number
       size: number
     }>(`/api/sessions/${id}/meta`),
+  sessionContext: (id: string) =>
+    req<{
+      id: string
+      usedTokens: number
+      windowSize: number
+      percent: number | null
+      model: string | null
+    }>(`/api/sessions/${id}/context`),
   deleteSession: (id: string) =>
     req<{ ok: boolean; id: string; removed: string[] }>(
       `/api/sessions/${id}`,
@@ -93,11 +101,16 @@ export const api = {
     files?: string[]
     name?: string | null
     workspaceId?: string | null
+    model?: string | null
+    permissionMode?: string | null
   }) =>
-    req<{ ok: boolean; cwd: string; command: string }>('/api/launch', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+    req<{ ok: boolean; cwd: string; command: string; trust?: unknown }>(
+      '/api/launch',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    ),
   listFs: (p: string) =>
     req<{ path: string; parent: string; items: FsItem[] }>(
       `/api/fs/list?path=${encodeURIComponent(p)}`,
@@ -141,6 +154,72 @@ export const api = {
     req<ClaudeProvidersResponse>(
       `/api/claude-providers/${encodeURIComponent(id)}/use`,
       { method: 'POST', body: '{}' },
+    ),
+
+  claudeSkills: () => req<ClaudeSkillsResponse>('/api/claude-skills'),
+  createClaudeSkill: (body: {
+    name: string
+    description?: string
+    body?: string
+  }) =>
+    req<ClaudeSkillsResponse & { ok: boolean; skill?: ClaudeSkill }>(
+      '/api/claude-skills',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  deleteClaudeSkill: (name: string) =>
+    req<ClaudeSkillsResponse & { ok: boolean }>(
+      `/api/claude-skills/${encodeURIComponent(name)}`,
+      { method: 'DELETE' },
+    ),
+
+  claudeMcp: () => req<ClaudeMcpResponse>('/api/claude-mcp'),
+  claudeMcpDetail: (name: string) =>
+    req<ClaudeMcpDetailResponse>(
+      `/api/claude-mcp/${encodeURIComponent(name)}`,
+    ),
+  claudeMcpTools: (
+    name: string,
+    opts?: { scope?: string; projectPath?: string | null },
+  ) => {
+    const q = new URLSearchParams()
+    if (opts?.scope) q.set('scope', opts.scope)
+    if (opts?.projectPath) q.set('projectPath', opts.projectPath)
+    const qs = q.toString()
+    return req<ClaudeMcpToolsResponse>(
+      `/api/claude-mcp/${encodeURIComponent(name)}/tools${qs ? `?${qs}` : ''}`,
+    )
+  },
+  createClaudeMcp: (body: {
+    name: string
+    transport?: 'http' | 'sse' | 'stdio'
+    url?: string
+    command?: string
+    argsText?: string
+    headers?: Record<string, string>
+  }) =>
+    req<ClaudeMcpResponse & { ok: boolean }>('/api/claude-mcp', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateClaudeMcp: (
+    name: string,
+    body: {
+      name?: string
+      transport?: 'http' | 'sse' | 'stdio'
+      url?: string
+      command?: string
+      argsText?: string
+      headers?: Record<string, string>
+    },
+  ) =>
+    req<ClaudeMcpResponse & { ok: boolean }>(
+      `/api/claude-mcp/${encodeURIComponent(name)}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  deleteClaudeMcp: (name: string) =>
+    req<ClaudeMcpResponse & { ok: boolean }>(
+      `/api/claude-mcp/${encodeURIComponent(name)}`,
+      { method: 'DELETE' },
     ),
 }
 
@@ -227,4 +306,71 @@ export type ClaudeProvidersResponse = {
   ccSwitchPath?: string
   ccSwitchCount?: number
   source?: string
+}
+
+export type ClaudeSkill = {
+  id: string
+  name: string
+  description: string
+  scope: 'user' | 'plugin' | string
+  path: string
+  editable: boolean
+  updatedAt?: number
+  preview?: string
+  plugin?: string
+}
+
+export type ClaudeSkillsResponse = {
+  skillsDir: string
+  skills: ClaudeSkill[]
+  userCount: number
+  pluginCount: number
+}
+
+export type ClaudeMcpServer = {
+  id: string
+  name: string
+  scope: 'user' | 'local' | 'project' | string
+  projectPath?: string | null
+  type: string
+  url: string
+  command: string
+  args: string[]
+  hasHeaders: boolean
+  hasAuthorization?: boolean
+  hasEnv: boolean
+  editable: boolean
+}
+
+export type ClaudeMcpTool = {
+  name: string
+  description: string
+}
+
+export type ClaudeMcpToolsResponse = {
+  ok: boolean
+  name: string
+  scope: string
+  projectPath?: string | null
+  type: string
+  toolCount: number
+  tools: ClaudeMcpTool[]
+  serverInfo?: { name?: string; version?: string } | null
+  protocolVersion?: string | null
+}
+
+export type ClaudeMcpDetailResponse = {
+  ok: boolean
+  server: ClaudeMcpServer
+  editable: boolean
+  headerAuth: string
+  hasAuthorization?: boolean
+}
+
+export type ClaudeMcpResponse = {
+  claudeJsonPath: string
+  servers: ClaudeMcpServer[]
+  userCount: number
+  localCount: number
+  projectCount: number
 }

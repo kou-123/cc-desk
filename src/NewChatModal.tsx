@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { basename } from './lib'
 import type { ProjectNode } from './lib'
-import { IconFolder, IconCompose } from './icons'
+import { IconFolder } from './icons'
 import { isElectronApp, pickFolders } from './native'
 import { PathPicker } from './PathPicker'
 
@@ -39,11 +39,8 @@ export function NewChatModal({
   onClose,
   onConfirm,
 }: Props) {
-  const withPath = useMemo(
-    () => projects.filter((p) => !!p.cwd),
-    [projects],
-  )
-  const preferred = withPath.find((p) => p.key === preferredKey) || null
+  const preferred =
+    projects.find((p) => p.key === preferredKey && !!p.cwd) || null
   const native = isElectronApp()
 
   const [name, setName] = useState(preferred?.name || '')
@@ -51,10 +48,6 @@ export function NewChatModal({
     preferred?.cwd
       ? uniqPaths([preferred.cwd, ...(preferred.addDirs || [])])
       : [],
-  )
-  /** multi-select known projects by key (⌘/Ctrl click) */
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(
-    () => new Set(preferred ? [preferred.key] : []),
   )
   const [webPick, setWebPick] = useState(false)
 
@@ -86,33 +79,7 @@ export function NewChatModal({
     })
     if (chosen.length) {
       applyPaths([...paths, ...chosen], !paths.length)
-      setSelectedKeys(new Set())
     }
-  }
-
-  const toggleKnown = (key: string, e: React.MouseEvent) => {
-    const project = withPath.find((p) => p.key === key)
-    if (!project?.cwd) return
-
-    const multi = e.metaKey || e.ctrlKey
-    setSelectedKeys((prev) => {
-      const next = new Set(multi ? prev : [])
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-
-      const collected: string[] = []
-      for (const k of next) {
-        const p = withPath.find((x) => x.key === k)
-        if (!p?.cwd) continue
-        collected.push(p.cwd)
-        for (const d of p.addDirs || []) collected.push(d)
-      }
-      // Keep manually picked paths that aren't from known list? Simpler: replace from selection
-      if (next.size > 0) {
-        applyPaths(collected, true)
-      }
-      return next
-    })
   }
 
   const removeAt = (path: string) => {
@@ -130,20 +97,19 @@ export function NewChatModal({
   const cwd = paths[0] || null
   const addDirs = paths.slice(1)
 
-  const submit = async (startNow: boolean) => {
+  const submit = async () => {
     if (!cwd) return
-    // If exactly one known saved workspace selected, reuse its id
-    let workspaceId: string | undefined
-    if (selectedKeys.size === 1) {
-      const only = withPath.find((p) => selectedKeys.has(p.key))
-      workspaceId = only?.workspace?.id
-    }
+    const samePreferred =
+      preferred?.workspace?.id &&
+      preferred.cwd === cwd &&
+      uniqPaths([preferred.cwd, ...(preferred.addDirs || [])]).join('\0') ===
+        uniqPaths([cwd, ...addDirs]).join('\0')
     await onConfirm({
       name: name.trim() || basename(cwd),
       cwd,
       addDirs,
-      workspaceId,
-      startNow,
+      workspaceId: samePreferred ? preferred?.workspace?.id : undefined,
+      startNow: true,
     })
   }
 
@@ -163,13 +129,6 @@ export function NewChatModal({
         </div>
 
         <div className="modal-body">
-          <div className="explain">
-            <strong>创建工作空间后再开始聊天</strong>
-            可点「打开文件选择器」选文件夹（⌘ 多选），或 ⌘
-            点选下方已知项目。第一个是 Primary，其余作为{' '}
-            <code>--add-dir</code>。
-          </div>
-
           <div className="field">
             <label>工作空间名称</label>
             <input
@@ -192,14 +151,19 @@ export function NewChatModal({
                   <span className="ico">
                     <IconFolder />
                   </span>
-                  <button
-                    type="button"
-                    className="name linkish"
-                    onClick={() => makePrimary(f.path)}
-                    title="设为 Primary"
-                  >
-                    {basename(f.path)}
-                  </button>
+                  <div className="folder-meta">
+                    <button
+                      type="button"
+                      className="name linkish"
+                      onClick={() => makePrimary(f.path)}
+                      title="设为 Primary"
+                    >
+                      {basename(f.path)}
+                    </button>
+                    <span className="path truncatable" title={f.path}>
+                      {f.path}
+                    </span>
+                  </div>
                   {f.primary ? (
                     <span className="badge">Primary</span>
                   ) : (
@@ -243,31 +207,6 @@ export function NewChatModal({
               }}
             />
           )}
-
-          {withPath.length > 0 && (
-            <div className="field">
-              <label>或从已知项目添加（⌘ / Ctrl 多选）</label>
-              <div className="pick-list">
-                {withPath.map((p) => (
-                  <button
-                    key={p.key}
-                    type="button"
-                    className={`pick-row ${selectedKeys.has(p.key) ? 'active' : ''}`}
-                    onClick={(e) => toggleKnown(p.key, e)}
-                  >
-                    <span className="ico">
-                      <IconFolder />
-                    </span>
-                    <span className="meta">
-                      <span className="name">{p.name}</span>
-                      <span className="path">{p.cwd}</span>
-                    </span>
-                    {p.workspace && <span className="badge">saved</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="modal-foot">
@@ -277,20 +216,11 @@ export function NewChatModal({
           <div className="right">
             <button
               type="button"
-              className="btn"
-              disabled={busy || !canSubmit}
-              onClick={() => void submit(false)}
-            >
-              仅保存
-            </button>
-            <button
-              type="button"
               className="btn primary"
               disabled={busy || !canSubmit}
-              onClick={() => void submit(true)}
+              onClick={() => void submit()}
             >
-              <IconCompose size={14} />
-              开始聊天
+              Save
             </button>
           </div>
         </div>

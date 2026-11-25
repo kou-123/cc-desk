@@ -6,7 +6,7 @@ type Props = {
   /** Delay before showing, ms. Default 800. */
   delayMs?: number
   className?: string
-  side?: 'right' | 'top'
+  side?: 'right' | 'top' | 'bottom'
 }
 
 export function Tip({

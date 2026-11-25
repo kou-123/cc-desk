@@ -88,10 +88,16 @@ export function SessionsView({ workspaces, onToast }: Props) {
     if (!selected) return
     setBusy(true)
     try {
+      const { readLaunchPrefs, permissionModeToCli } = await import(
+        './launchPrefs'
+      )
+      const prefs = readLaunchPrefs()
       const result = await api.launch({
         sessionId: selected.id,
         cwd: selected.cwd,
         workspaceId: workspaceId || null,
+        model: prefs.model,
+        permissionMode: permissionModeToCli(prefs.permissionMode),
       })
       onToast(`已在 Terminal 打开：${result.command}`)
     } catch (e) {

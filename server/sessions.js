@@ -339,6 +339,13 @@ function contentParts(content, sessionId = '') {
     } else if (c.type === 'image') {
       const src = imageSrcFromPart(c, sessionId)
       if (src) parts.push({ type: 'image', src })
+    } else if (c.type === 'document') {
+      const media = c.source?.media_type || c.media_type || 'application/pdf'
+      parts.push({
+        type: 'file',
+        name: media === 'application/pdf' ? 'document.pdf' : 'attachment',
+        kind: 'document',
+      })
     } else if (c.type === 'thinking' && (c.thinking || c.text)) {
       parts.push({ type: 'thinking', text: String(c.thinking || c.text) })
     } else if (c.type === 'tool_use') {
@@ -406,6 +413,31 @@ function isNoiseText(text) {
   return false
 }
 
+/** CC Desk injects this hint for staged files — show as chips, not raw path dump. */
+const UPLOAD_HINT_RE =
+  /\n*\s*用户附带了以下本地文件（可用 Read 工具查看）：\s*\n((?:[ \t]*- .+\n?)*)/g
+
+function stripUploadHint(text) {
+  const files = []
+  const clean = String(text || '')
+    .replace(UPLOAD_HINT_RE, (_m, block) => {
+      for (const line of String(block || '').split('\n')) {
+        const hit = line.trim().match(/^- (.+)$/)
+        if (!hit) continue
+        const full = hit[1].trim()
+        if (!full) continue
+        files.push({
+          name: path.basename(full) || full,
+          kind: 'file',
+        })
+      }
+      return '\n'
+    })
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return { text: clean, files }
+}
+
 function workLabel(thinking, tools) {
   const toolSum = summarizeTools(tools)
   if (thinking.length && toolSum) return `思考与工具 · ${toolSum}`
@@ -446,6 +478,79 @@ export async function getSessionMeta(sessionId) {
     transcriptPath,
     mtimeMs: st.mtimeMs,
     size: st.size,
+  }
+}
+
+/**
+ * Approximate Claude Code status-line context % from the latest transcript usage.
+ * used = input + cache_creation + cache_read (same as CLI used_percentage).
+ */
+export async function getSessionContextUsage(sessionId) {
+  const empty = {
+    id: sessionId,
+    usedTokens: 0,
+    windowSize: 200_000,
+    percent: null,
+    model: null,
+  }
+  const transcriptPath = await findTranscriptPath(sessionId)
+  if (!transcriptPath) return empty
+
+  const st = await fsp.stat(transcriptPath)
+  if (!st.size) return empty
+
+  const readSize = Math.min(st.size, 512 * 1024)
+  const start = st.size - readSize
+  const fh = await fsp.open(transcriptPath, 'r')
+  try {
+    const buf = Buffer.alloc(readSize)
+    await fh.read(buf, 0, readSize, start)
+    const text = buf.toString('utf8')
+    const lines = text.split('\n')
+    let usage = null
+    let model = null
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim()
+      if (!line) continue
+      try {
+        const row = JSON.parse(line)
+        if (row?.isSidechain) continue
+        const u = row?.message?.usage || row?.usage
+        if (!u || typeof u !== 'object') continue
+        if (typeof u.input_tokens !== 'number') continue
+        usage = u
+        model = row?.message?.model || row?.model || null
+        break
+      } catch {
+        /* skip bad line */
+      }
+    }
+    if (!usage) return empty
+
+    const usedTokens =
+      Number(usage.input_tokens || 0) +
+      Number(usage.cache_creation_input_tokens || 0) +
+      Number(usage.cache_read_input_tokens || 0)
+    const modelStr = String(model || '')
+    const windowSize =
+      /\[1m\]/i.test(modelStr) ||
+      /1m/i.test(modelStr) ||
+      /1000000|1_?000_?000/.test(modelStr)
+        ? 1_000_000
+        : 200_000
+    const percent =
+      windowSize > 0
+        ? Math.min(100, Math.round((usedTokens / windowSize) * 1000) / 10)
+        : null
+    return {
+      id: sessionId,
+      usedTokens,
+      windowSize,
+      percent,
+      model: modelStr || null,
+    }
+  } finally {
+    await fh.close()
   }
 }
 
@@ -524,12 +629,22 @@ export async function getSessionMessages(sessionId, limit = 120) {
     work = null
   }
 
-  const pushVisible = ({ role, text, images, ts, model, durationMs, thinkingMs }) => {
+  const pushVisible = ({
+    role,
+    text,
+    images,
+    files,
+    ts,
+    model,
+    durationMs,
+    thinkingMs,
+  }) => {
     blocks.push({
       kind: role,
       role,
       text: text || '',
       images: images || [],
+      files: files || [],
       timestamp: ts || null,
       model: model || null,
       durationMs: durationMs ?? null,
@@ -561,10 +676,12 @@ export async function getSessionMessages(sessionId, limit = 120) {
       continue
     }
 
+    // Only real transcript turns — ignore api-request-blob / progress echoes
+    // that also carry message.role === 'user' and would duplicate the bubble.
     const role =
-      row.type === 'user' || row.message?.role === 'user'
+      row.type === 'user'
         ? 'user'
-        : row.type === 'assistant' || row.message?.role === 'assistant'
+        : row.type === 'assistant'
           ? 'assistant'
           : null
     if (!role) continue
@@ -585,6 +702,7 @@ export async function getSessionMessages(sessionId, limit = 120) {
 
     const hasUserVisibleText = parts.some((p) => p.type === 'text')
     const hasImages = parts.some((p) => p.type === 'image')
+    const hasFiles = parts.some((p) => p.type === 'file')
 
     if (role === 'user' && parts.every((p) => p.type === 'tool_result')) {
       ensureWork()
@@ -605,7 +723,7 @@ export async function getSessionMessages(sessionId, limit = 120) {
       continue
     }
 
-    if (role === 'assistant' && !hasUserVisibleText && !hasImages) {
+    if (role === 'assistant' && !hasUserVisibleText && !hasImages && !hasFiles) {
       ensureWork()
       work.timestamp = work.timestamp || ts
       if (model) work.model = model
@@ -648,18 +766,44 @@ export async function getSessionMessages(sessionId, limit = 120) {
         parts.filter((p) => p.type === 'image' && p.src).map((p) => p.src),
       ),
     ]
+    let files = parts
+      .filter((p) => p.type === 'file')
+      .map((p) => ({ name: p.name || 'attachment', kind: p.kind || 'file' }))
     const text = parts
       .filter((p) => p.type === 'text')
       .map((p) => p.text)
       .join('\n')
       .trim()
-    const cleanText = text && !isNoiseText(text) ? clip(text, 12000) : ''
-    if (!cleanText && !images.length) continue
+    let cleanText = text && !isNoiseText(text) ? clip(text, 12000) : ''
+    if (cleanText) {
+      const stripped = stripUploadHint(cleanText)
+      cleanText = stripped.text
+      if (stripped.files.length) {
+        const seen = new Set(files.map((f) => f.name))
+        for (const f of stripped.files) {
+          if (seen.has(f.name)) continue
+          seen.add(f.name)
+          files.push(f)
+        }
+      }
+    }
+    if (!cleanText && !images.length && !files.length) continue
 
     if (role === 'user') {
+      // Claude Code often re-emits the same turn as `[Image: source: …]`
+      // placeholders after the real base64 user message — skip that echo.
+      const prev = [...blocks].reverse().find((b) => b.kind === 'user')
+      const imageOnlyEcho = !cleanText && !files.length && images.length > 0
+      if (
+        imageOnlyEcho &&
+        prev &&
+        (prev.images?.length || 0) >= images.length
+      ) {
+        continue
+      }
       turnStartMs = tsMs
       thinkingMsAccum = 0
-      pushVisible({ role, text: cleanText, images, ts })
+      pushVisible({ role, text: cleanText, images, files, ts })
       continue
     }
 
@@ -676,6 +820,7 @@ export async function getSessionMessages(sessionId, limit = 120) {
       role,
       text: cleanText,
       images,
+      files,
       ts,
       model: model || lastModel,
       durationMs,
