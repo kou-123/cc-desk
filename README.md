@@ -11,7 +11,7 @@ Claude Code 桌面伴侣：历史会话、Workspace、供应商切换，一键�
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 <p align="center">
-  <img src="build/icons/preview.png" alt="CC Desk preview" width="720" />
+  <img src="build/icons/icon.png" alt="CC Desk app icon" width="180" />
 </p>
 
 ---
