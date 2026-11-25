@@ -18,6 +18,8 @@ type ChatRequest = {
   addDirs?: string[]
   attachments?: ChatRequestAttachment[]
   permissionMode?: string
+  /** Claude Code CLI `--effort` */
+  effort?: string
   /** Optimistic preview URLs for images in the local turn */
   previewImages?: string[]
   previewFiles?: { name: string; kind: string }[]

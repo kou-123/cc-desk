@@ -103,6 +103,7 @@ export const api = {
     workspaceId?: string | null
     model?: string | null
     permissionMode?: string | null
+    effort?: string | null
   }) =>
     req<{ ok: boolean; cwd: string; command: string; trust?: unknown }>(
       '/api/launch',

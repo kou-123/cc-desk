@@ -98,6 +98,7 @@ export function SessionsView({ workspaces, onToast }: Props) {
         workspaceId: workspaceId || null,
         model: prefs.model,
         permissionMode: permissionModeToCli(prefs.permissionMode),
+        effort: prefs.effort,
       })
       onToast(`已在 Terminal 打开：${result.command}`)
     } catch (e) {

@@ -18,6 +18,15 @@ import {
   type ChatAttachment,
 } from './attachments'
 import {
+  EFFORT_LEVELS,
+  EFFORT_PREF,
+  effortFromIndex,
+  effortIndex,
+  effortLabel,
+  readStoredEffort,
+  type EffortLevel,
+} from './effortLevels'
+import {
   PERMISSION_MODES,
   PERMISSION_PREF,
   permissionModeLabel,
@@ -40,6 +49,7 @@ export type ComposerPayload = {
   prompt: string
   model: string
   permissionMode: PermissionMode
+  effort: EffortLevel
   attachments: ChatAttachment[]
 }
 
@@ -145,8 +155,10 @@ export function ChatComposer({
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(
     readStoredPermissionMode,
   )
+  const [effort, setEffort] = useState<EffortLevel>(readStoredEffort)
+  const [effortOpen, setEffortOpen] = useState(false)
   const [permOpen, setPermOpen] = useState(false)
-  const modelRef = useRef<HTMLDivElement>(null)
+  const effortRef = useRef<HTMLDivElement>(null)
   const permRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const slashListRef = useRef<HTMLUListElement>(null)
@@ -203,29 +215,38 @@ export function ChatComposer({
   }, [reload])
 
   useEffect(() => {
-    if (!menuOpen && !permOpen) {
+    if (!effortOpen && !permOpen) {
       setProviderOpen(false)
+      setMenuOpen(false)
       return
     }
     const onDoc = (e: MouseEvent) => {
       const t = e.target as Node
-      if (menuOpen && !modelRef.current?.contains(t)) setMenuOpen(false)
+      if (effortOpen && effortRef.current && !effortRef.current.contains(t)) {
+        setEffortOpen(false)
+        setMenuOpen(false)
+        setProviderOpen(false)
+      }
       if (permOpen && !permRef.current?.contains(t)) setPermOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       if (providerOpen) setProviderOpen(false)
       else if (menuOpen) setMenuOpen(false)
+      else if (effortOpen) setEffortOpen(false)
       else if (permOpen) setPermOpen(false)
     }
-    // Use click (not mousedown) so dragging the permission menu scrollbar isn't interrupted.
-    document.addEventListener('click', onDoc)
+    // Defer so the same click that opened the panel doesn't immediately close it.
+    const timer = window.setTimeout(() => {
+      document.addEventListener('click', onDoc)
+    }, 0)
     document.addEventListener('keydown', onKey)
     return () => {
+      window.clearTimeout(timer)
       document.removeEventListener('click', onDoc)
       document.removeEventListener('keydown', onKey)
     }
-  }, [menuOpen, providerOpen, permOpen])
+  }, [effortOpen, menuOpen, providerOpen, permOpen])
 
   const selected = options.find((o) => o.value === choice) || options[0] || null
   const model = selected?.value || ''
@@ -383,6 +404,15 @@ export function ChatComposer({
     setPermOpen(false)
   }
 
+  function pickEffort(next: EffortLevel) {
+    setEffort(next)
+    try {
+      localStorage.setItem(EFFORT_PREF, next)
+    } catch {
+      /* ignore */
+    }
+  }
+
   function submit() {
     const prompt = text.trim()
     if (running || disabled || (!prompt && !attachments.length)) return
@@ -390,6 +420,7 @@ export function ChatComposer({
       prompt,
       model,
       permissionMode,
+      effort,
       attachments: [...attachments],
     })
     setText('')
@@ -627,6 +658,7 @@ export function ChatComposer({
                 title="权限模式（对应 Claude Code --permission-mode）"
                 onClick={() => {
                   setPermOpen((v) => !v)
+                  setEffortOpen(false)
                   setMenuOpen(false)
                 }}
               >
@@ -737,110 +769,206 @@ export function ChatComposer({
               )
             })()}
             <div
-              className={`chat-model${canOpen ? '' : ' is-empty'}${menuOpen ? ' is-open' : ''}`}
-              ref={modelRef}
+              className={`chat-effort${effortOpen ? ' is-open' : ''}${
+                canOpen ? '' : ' is-empty'
+              }`}
+              ref={effortRef}
             >
-            <button
-              type="button"
-              className="chat-model-trigger"
-              disabled={running || !canOpen}
-              aria-haspopup="listbox"
-              aria-expanded={menuOpen}
-              title="选择供应商与模型"
-              onClick={() => {
-                void reload()
-                setMenuOpen((v) => !v)
-                setProviderOpen(false)
-              }}
-            >
-              <span className="chat-model-label">{modelLabel}</span>
-            </button>
-            {menuOpen && canOpen ? (
-              <div className="chat-model-panel">
-                {providers.length > 0 ? (
-                  <div className="chat-provider-block">
-                    <button
-                      type="button"
-                      className={`chat-provider-trigger${providerOpen ? ' is-open' : ''}`}
-                      disabled={switching || running}
-                      onClick={() => setProviderOpen((v) => !v)}
-                    >
-                      <span
-                        className="chat-provider-dot"
-                        style={{
-                          background:
-                            currentProvider?.iconColor || 'var(--claude)',
+              <button
+                type="button"
+                className="chat-effort-trigger"
+                disabled={running || disabled}
+                aria-haspopup="dialog"
+                aria-expanded={effortOpen}
+                title={`${modelLabel} · ${effortLabel(effort)}（点开可改模型与思考强度）`}
+                onClick={() => {
+                  setEffortOpen((v) => !v)
+                  setMenuOpen(false)
+                  setProviderOpen(false)
+                  setPermOpen(false)
+                }}
+              >
+                <span className="chat-effort-trigger-label">
+                  <span className="chat-effort-trigger-model">{modelLabel}</span>
+                  <span className="chat-effort-trigger-effort">
+                    {effortLabel(effort)}
+                  </span>
+                </span>
+              </button>
+              {effortOpen ? (
+                <div
+                  className={`chat-effort-panel${menuOpen ? ' is-models' : ''}`}
+                  role="dialog"
+                  aria-label="思考强度"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {!menuOpen ? (
+                    <>
+                      <div className="chat-effort-head">
+                        <span className="chat-effort-level">
+                          {effortLabel(effort)}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="chat-effort-model"
+                        disabled={running}
+                        title="选择供应商与模型"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setProviderOpen(false)
+                          setMenuOpen(true)
+                          void reload()
                         }}
-                      />
-                      <span className="chat-provider-name">
-                        {currentProvider?.name || '选择供应商'}
-                      </span>
-                      <span className="chat-provider-chevron">
-                        {providerOpen ? '▾' : '›'}
-                      </span>
-                    </button>
-                    {providerOpen ? (
-                      <ul className="chat-provider-menu" role="listbox">
-                        {providers.map((p) => (
-                          <li key={p.id}>
+                      >
+                        <span className="chat-effort-model-name">
+                          {modelLabel}
+                        </span>
+                        <span className="chat-effort-model-chev" aria-hidden>
+                          ›
+                        </span>
+                      </button>
+                      <div className="chat-effort-slider-wrap">
+                        <input
+                          type="range"
+                          className="chat-effort-slider"
+                          min={0}
+                          max={EFFORT_LEVELS.length - 1}
+                          step={1}
+                          value={effortIndex(effort)}
+                          aria-valuetext={effortLabel(effort)}
+                          aria-label="思考强度"
+                          disabled={running}
+                          onChange={(e) =>
+                            pickEffort(effortFromIndex(Number(e.target.value)))
+                          }
+                        />
+                        <div className="chat-effort-dots" aria-hidden>
+                          {EFFORT_LEVELS.map((lv, i) => (
                             <button
+                              key={lv.id}
                               type="button"
-                              role="option"
-                              aria-selected={p.id === currentProvider?.id}
-                              className={`chat-provider-option${
-                                p.id === currentProvider?.id ? ' active' : ''
-                              }`}
-                              disabled={switching || running}
-                              onClick={() => void switchProvider(p)}
-                            >
-                              <span
-                                className="chat-provider-dot"
-                                style={{
-                                  background: p.iconColor || 'var(--claude)',
-                                }}
-                              />
-                              <span className="chat-provider-option-name">
-                                {p.name}
-                              </span>
-                              {p.id === currentProvider?.id ? (
-                                <span className="chat-provider-check">✓</span>
-                              ) : null}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {!providerOpen ? (
-                  options.length > 0 ? (
-                    <ul className="chat-model-menu" role="listbox">
-                      {options.map((o) => (
-                        <li key={o.value}>
+                              className={`chat-effort-dot${
+                                i <= effortIndex(effort) ? ' on' : ''
+                              }${i === effortIndex(effort) ? ' active' : ''}`}
+                              tabIndex={-1}
+                              onClick={() => pickEffort(lv.id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="chat-model-panel nested">
+                      <button
+                        type="button"
+                        className="chat-effort-back"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setMenuOpen(false)
+                          setProviderOpen(false)
+                        }}
+                      >
+                        ‹ 思考强度
+                      </button>
+                      {providers.length > 0 ? (
+                        <div className="chat-provider-block">
                           <button
                             type="button"
-                            role="option"
-                            aria-selected={o.value === model}
-                            className={`chat-model-option${
-                              o.value === model ? ' active' : ''
+                            className={`chat-provider-trigger${
+                              providerOpen ? ' is-open' : ''
                             }`}
-                            onClick={() => pickModel(o.value)}
+                            disabled={switching || running}
+                            onClick={() => setProviderOpen((v) => !v)}
                           >
-                            {o.label}
+                            <span
+                              className="chat-provider-dot"
+                              style={{
+                                background:
+                                  currentProvider?.iconColor || 'var(--claude)',
+                              }}
+                            />
+                            <span className="chat-provider-name">
+                              {currentProvider?.name || '选择供应商'}
+                            </span>
+                            <span className="chat-provider-chevron">
+                              {providerOpen ? '▾' : '›'}
+                            </span>
                           </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="chat-model-empty">
-                      当前供应商还没有配置模型映射
+                          {providerOpen ? (
+                            <ul className="chat-provider-menu" role="listbox">
+                              {providers.map((p) => (
+                                <li key={p.id}>
+                                  <button
+                                    type="button"
+                                    role="option"
+                                    aria-selected={p.id === currentProvider?.id}
+                                    className={`chat-provider-option${
+                                      p.id === currentProvider?.id
+                                        ? ' active'
+                                        : ''
+                                    }`}
+                                    disabled={switching || running}
+                                    onClick={() => void switchProvider(p)}
+                                  >
+                                    <span
+                                      className="chat-provider-dot"
+                                      style={{
+                                        background:
+                                          p.iconColor || 'var(--claude)',
+                                      }}
+                                    />
+                                    <span className="chat-provider-option-name">
+                                      {p.name}
+                                    </span>
+                                    {p.id === currentProvider?.id ? (
+                                      <span className="chat-provider-check">
+                                        ✓
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {!providerOpen ? (
+                        options.length > 0 ? (
+                          <ul className="chat-model-menu" role="listbox">
+                            {options.map((o) => (
+                              <li key={o.value}>
+                                <button
+                                  type="button"
+                                  role="option"
+                                  aria-selected={o.value === model}
+                                  className={`chat-model-option${
+                                    o.value === model ? ' active' : ''
+                                  }`}
+                                  onClick={() => {
+                                    pickModel(o.value)
+                                    setMenuOpen(false)
+                                  }}
+                                >
+                                  {o.label}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div className="chat-model-empty">
+                            当前供应商还没有配置模型映射
+                          </div>
+                        )
+                      ) : null}
                     </div>
-                  )
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
             {running ? (
               <button
                 className="btn danger chat-stop"

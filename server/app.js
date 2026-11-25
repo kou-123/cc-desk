@@ -396,6 +396,7 @@ export function createApp({ staticDir } = {}) {
         workspaceId = null,
         model = null,
         permissionMode = null,
+        effort = null,
       } = req.body || {}
 
       let resolvedCwd = cwd
@@ -444,6 +445,7 @@ export function createApp({ staticDir } = {}) {
         name: sessionId ? null : resolvedName,
         model,
         permissionMode,
+        effort,
         claudeBin,
       })
 

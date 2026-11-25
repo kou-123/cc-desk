@@ -288,6 +288,52 @@ export default function App() {
     [chat.turns],
   )
 
+  // Sidebar attention dots: pending tool confirm, or turn finished while elsewhere.
+  const viewingSessionId =
+    selection?.kind === 'session' ? selection.id : null
+  const prevRunningRef = useRef<Record<string, boolean>>({})
+  const [unreadDone, setUnreadDone] = useState<Record<string, true>>({})
+
+  useEffect(() => {
+    const prev = prevRunningRef.current
+    const next: Record<string, boolean> = {}
+    const finished: string[] = []
+    for (const [id, turn] of Object.entries(chat.turns)) {
+      next[id] = !!turn.running
+      if (prev[id] && !turn.running && id !== viewingSessionId) {
+        finished.push(id)
+      }
+    }
+    prevRunningRef.current = next
+    if (!finished.length) return
+    setUnreadDone((m) => {
+      const copy = { ...m }
+      for (const id of finished) copy[id] = true
+      return copy
+    })
+  }, [chat.turns, viewingSessionId])
+
+  useEffect(() => {
+    if (!viewingSessionId) return
+    setUnreadDone((m) => {
+      if (!m[viewingSessionId]) return m
+      const copy = { ...m }
+      delete copy[viewingSessionId]
+      return copy
+    })
+  }, [viewingSessionId])
+
+  const sessionAttention = useCallback(
+    (id: string) => {
+      if (viewingSessionId === id) return false
+      const turn = chat.turns[id]
+      if (turn?.approvals?.length) return true
+      if (unreadDone[id]) return true
+      return false
+    },
+    [viewingSessionId, chat.turns, unreadDone],
+  )
+
   // Warn on window close / Cmd+Q while Claude is still working.
   useEffect(() => {
     setAppBusy(chatBusy)
@@ -473,6 +519,12 @@ export default function App() {
       setDrafts((prev) => prev.filter((draft) => draft.id !== session.id))
       chat.clear(session.id)
       draftContext.current.delete(session.id)
+      setUnreadDone((m) => {
+        if (!m[session.id]) return m
+        const copy = { ...m }
+        delete copy[session.id]
+        return copy
+      })
       if (selection?.kind === 'session' && selection.id === session.id) {
         setSelection(null)
         setMessages([])
@@ -601,6 +653,7 @@ export default function App() {
     prompt: string
     model: string
     permissionMode: string
+    effort: string
     attachments: {
       name: string
       mime: string
@@ -625,6 +678,7 @@ export default function App() {
       prompt: payload.prompt,
       model: payload.model,
       permissionMode: payload.permissionMode,
+      effort: payload.effort,
       cwd,
       resume: !!session.transcriptPath,
       workspaceId: context?.workspaceId ?? selectedProject?.workspace?.id,
@@ -697,6 +751,7 @@ export default function App() {
         addDirs: p?.addDirs || [],
         model: prefs.model,
         permissionMode: permissionModeToCli(prefs.permissionMode),
+        effort: prefs.effort,
       })
       setLiveSessionId(session.id)
       setSelection({ kind: 'session', id: session.id })
@@ -886,6 +941,10 @@ export default function App() {
                 setSelection({ kind: 'session', id: pinnedRecent.id })
               }
             >
+              <span
+                className={`side-attn${sessionAttention(pinnedRecent.id) ? ' on' : ''}`}
+                aria-hidden
+              />
               <span className="ico avatar">
                 <IconUser />
               </span>
@@ -904,12 +963,17 @@ export default function App() {
                     projects.find((p) =>
                       p.sessions.some((x) => x.id === s.id),
                     ) || null
+                  const attn = sessionAttention(s.id)
                   return (
                     <div key={s.id} className="session-row">
                       <button
                         type="button"
                         className={`side-item ${selection?.kind === 'session' && selection.id === s.id ? 'active' : ''}`}
-                        title={s.cwd || sessionTitle(s)}
+                        title={
+                          attn
+                            ? `${sessionTitle(s)}（需要关注）`
+                            : s.cwd || sessionTitle(s)
+                        }
                         onClick={() =>
                           setSelection({ kind: 'session', id: s.id })
                         }
@@ -929,6 +993,10 @@ export default function App() {
                           })
                         }}
                       >
+                        <span
+                          className={`side-attn${attn ? ' on' : ''}`}
+                          aria-hidden
+                        />
                         <span className="label">{sessionTitle(s)}</span>
                       </button>
                       <button
@@ -1006,11 +1074,18 @@ export default function App() {
                       </button>
                     </div>
                     {open &&
-                      visible.map((s) => (
+                      visible.map((s) => {
+                        const attn = sessionAttention(s.id)
+                        return (
                         <div key={s.id} className="session-row child">
                           <button
                             type="button"
                             className={`side-item child ${selection?.kind === 'session' && selection.id === s.id ? 'active' : ''}`}
+                            title={
+                              attn
+                                ? `${sessionTitle(s)}（需要关注）`
+                                : sessionTitle(s)
+                            }
                             onClick={() =>
                               setSelection({ kind: 'session', id: s.id })
                             }
@@ -1027,6 +1102,10 @@ export default function App() {
                               })
                             }}
                           >
+                            <span
+                              className={`side-attn${attn ? ' on' : ''}`}
+                              aria-hidden
+                            />
                             <span className="label">{sessionTitle(s)}</span>
                           </button>
                           <button
@@ -1043,7 +1122,8 @@ export default function App() {
                             <IconX size={12} />
                           </button>
                         </div>
-                      ))}
+                        )
+                      })}
                     {open && more > 0 && (
                       <button
                         type="button"
@@ -1163,6 +1243,7 @@ export default function App() {
                       }
                       const perm = permissionModeToCli(prefs.permissionMode)
                       if (perm) bits.push('--permission-mode', perm)
+                      if (prefs.effort) bits.push('--effort', prefs.effort)
                       void navigator.clipboard.writeText(bits.join(' '))
                       showToast('已复制命令')
                     }}

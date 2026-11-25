@@ -192,6 +192,7 @@ export async function streamChat(req, res) {
     workspaceId,
     attachments = [],
     permissionMode = 'default',
+    effort = null,
   } = req.body || {}
   if (!fromPanel(req)) return res.sendStatus(403)
   const promptText = typeof prompt === 'string' ? prompt : ''
@@ -210,6 +211,14 @@ export async function streamChat(req, res) {
   if (perm === 'dontAsk' || perm === 'bypassPermissions') perm = 'default'
   if (!ALLOWED_PERMISSION.has(perm)) {
     return res.status(400).json({ error: '无效的权限模式' })
+  }
+  const ALLOWED_EFFORT = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
+  let effortLevel = effort == null || effort === '' ? null : String(effort).trim().toLowerCase()
+  if (effortLevel === 'extra' || effortLevel === 'extra-high' || effortLevel === 'extra_high') {
+    effortLevel = 'xhigh'
+  }
+  if (effortLevel && !ALLOWED_EFFORT.has(effortLevel)) {
+    return res.status(400).json({ error: '无效的思考强度' })
   }
   if (rawAttachments.length > MAX_ATTACH_COUNT) {
     return res.status(400).json({ error: `一次最多附带 ${MAX_ATTACH_COUNT} 个文件` })
@@ -256,6 +265,7 @@ export async function streamChat(req, res) {
       '--permission-mode', perm]
     args.push(existing ? '--resume' : '--session-id', sessionId)
     if (model) args.push('--model', model)
+    if (effortLevel) args.push('--effort', effortLevel)
     for (const dir of dirs) if (dir !== cwd) args.push('--add-dir', dir)
     if (res.destroyed) return
     child = spawn(bin, args, { cwd, env: enrichedEnv(), stdio: 'pipe' })

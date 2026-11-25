@@ -15,6 +15,7 @@ export function buildClaudeCommand({
   name,
   model = null,
   permissionMode = null,
+  effort = null,
   extraArgs = [],
   claudeBin = 'claude',
 }) {
@@ -44,6 +45,19 @@ export function buildClaudeCommand({
     )
   ) {
     parts.push('--permission-mode', perm)
+  }
+  let effortLevel = String(effort || '')
+    .trim()
+    .toLowerCase()
+  if (
+    effortLevel === 'extra' ||
+    effortLevel === 'extra-high' ||
+    effortLevel === 'extra_high'
+  ) {
+    effortLevel = 'xhigh'
+  }
+  if (['low', 'medium', 'high', 'xhigh', 'max'].includes(effortLevel)) {
+    parts.push('--effort', effortLevel)
   }
   for (const dir of addDirs) {
     if (dir) {

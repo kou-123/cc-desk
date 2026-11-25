@@ -484,8 +484,21 @@ button {
   white-space: nowrap;
 }
 
+.side-attn {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: transparent;
+  margin-left: 2px;
+}
+.side-attn.on {
+  background: var(--claude);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--claude) 22%, transparent);
+}
+
 .side-item.child {
-  padding: 5px 8px 5px 30px;
+  padding: 5px 8px 5px 22px;
   font-size: 0.8rem;
   color: var(--muted);
   font-weight: 400;
@@ -3566,11 +3579,14 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.chat-input-tools-left {
   min-width: 0;
 }
 .chat-input-tools-right {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   justify-content: flex-end;
+  overflow: visible;
 }
 .chat-context-ring {
   position: relative;
@@ -3633,6 +3649,186 @@ button {
   flex-shrink: 0;
   border-radius: 999px;
 }
+/* Codex-style effort (thinking intensity) control */
+.chat-effort {
+  position: relative;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+.chat-effort-trigger {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 550;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: visible;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.chat-effort-trigger:hover:not(:disabled),
+.chat-effort.is-open .chat-effort-trigger {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.chat-effort-trigger:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.chat-effort-trigger-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  white-space: nowrap;
+  overflow: visible;
+}
+.chat-effort-trigger-model {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  color: inherit;
+  font-weight: 500;
+}
+.chat-effort-trigger-effort {
+  flex: 0 0 auto;
+  color: inherit;
+  font-weight: 600;
+}
+.chat-effort-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  width: 220px;
+  padding: 12px 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chat-effort-panel.is-models {
+  width: min(280px, 72vw);
+  max-height: min(360px, 50vh);
+  overflow: auto;
+}
+.chat-effort-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chat-effort-level {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--claude);
+  letter-spacing: -0.01em;
+}
+.chat-effort-model {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-effort-model:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.chat-effort-model:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.chat-effort-model-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: visible;
+}
+.chat-effort-model-chev {
+  flex-shrink: 0;
+  color: var(--dim);
+}
+.chat-effort-slider-wrap {
+  position: relative;
+  padding: 6px 2px 2px;
+}
+.chat-effort-slider {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--claude);
+  cursor: pointer;
+}
+.chat-effort-dots {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding: 0 2px;
+  pointer-events: none;
+}
+.chat-effort-dot {
+  width: 5px;
+  height: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--line-strong);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.chat-effort-dot.on {
+  background: color-mix(in srgb, var(--claude) 55%, var(--line-strong));
+}
+.chat-effort-dot.active {
+  background: var(--claude);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--claude) 22%, transparent);
+}
+.chat-effort-back {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  margin: 0 0 2px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.chat-effort-back:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.chat-model-panel.nested {
+  position: static;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
 .chat-model {
   position: relative;
   max-width: min(260px, 55%);

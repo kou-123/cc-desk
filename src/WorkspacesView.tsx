@@ -129,6 +129,7 @@ export function WorkspacesView({ workspaces, onChange, onToast }: Props) {
         name: draft.name,
         model: prefs.model,
         permissionMode: permissionModeToCli(prefs.permissionMode),
+        effort: prefs.effort,
       })
       onToast(`已启动：${result.command}`)
     } catch (e) {
