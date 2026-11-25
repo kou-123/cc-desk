@@ -224,7 +224,7 @@ button {
   line-height: 1.35;
   white-space: nowrap;
   color: var(--text);
-  background: #1a1a1a;
+  background: var(--bg-elev);
   border: 1px solid var(--line-strong);
   box-shadow: var(--shadow);
   pointer-events: none;
@@ -1427,6 +1427,27 @@ button {
 .crumbs strong {
   color: var(--claude-soft);
   font-weight: 550;
+}
+
+.foot-stats {
+  flex-shrink: 0;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.foot-sep {
+  margin: 0 0.35em;
+  color: var(--dim);
+}
+
+.foot-cli {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.foot-cli.is-on {
+  color: var(--claude-soft);
+  font-weight: 600;
 }
 
 .btn {

@@ -674,7 +674,7 @@ export function ChatComposer({
                   onWheel={(e) => e.stopPropagation()}
                 >
                   <div className="chat-perm-head">
-                    How should Claude&apos;s actions be approved?
+                    权限模式
                   </div>
                   <ul className="chat-perm-menu">
                     {PERMISSION_MODES.map((m) => (

@@ -22,30 +22,30 @@ export const PERMISSION_PREF = 'cc-desk.permission-mode'
 export const PERMISSION_MODES: PermissionModeOption[] = [
   {
     id: 'default',
-    label: 'Ask',
-    labelZh: '每次询问',
-    detail: '读写工作区外文件、执行命令或访问网络前都先征求你同意',
+    label: 'Manual',
+    labelZh: '手动审批',
+    detail: '需要审批的操作会先询问你；已获准的操作直接执行。',
     icon: 'hand',
   },
   {
     id: 'acceptEdits',
     label: 'Accept edits',
-    labelZh: '自动批准编辑',
-    detail: '自动允许工作区内的文件编辑与常见文件系统命令，其它操作仍会询问',
+    labelZh: '接受编辑',
+    detail: '自动批准工作区内的文件编辑和部分常用文件操作，其他操作按权限规则处理。',
     icon: 'spark',
   },
   {
     id: 'auto',
     label: 'Auto',
     labelZh: '自动',
-    detail: '尽量自动执行，由后台分类器审查可能不安全的操作',
+    detail: '由 Claude Code 自动审查工具调用，放行常规操作，拦截高风险操作。',
     icon: 'auto',
   },
   {
     id: 'plan',
     label: 'Plan',
-    labelZh: '仅规划',
-    detail: '可以读代码、调研并给出方案，但不直接改源码',
+    labelZh: '规划',
+    detail: '只读探索项目并拟定方案，退出规划模式后再实施。',
     icon: 'plan',
   },
 ]

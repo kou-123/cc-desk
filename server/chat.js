@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import os from 'node:os'
 import { createInterface } from 'node:readline'
 import { enrichedEnv, resolveClaudeBin } from './claudeCli.js'
 import { dirsFromFiles } from './launch.js'
@@ -95,6 +96,57 @@ async function buildUserContent(prompt, attachments, cwd, sessionId) {
 }
 
 const active = new Map()
+const workers = new Map()
+const IDLE_MS = 10 * 60 * 1000
+
+function startWorker(id, signature, bin, args, cwd) {
+  const child = spawn(bin, args, { cwd, env: enrichedEnv(), stdio: 'pipe' })
+  let idleTimer
+  let killTimer
+  let stderr = ''
+  let onExit
+  const closed = new Promise(resolve => { onExit = resolve })
+  const worker = {
+    signature, child, closed, onLine: null, onFailure: null,
+    wake() { clearTimeout(idleTimer) },
+    park() {
+      worker.onLine = null
+      worker.onFailure = null
+      stderr = ''
+      idleTimer = setTimeout(() => worker.stop(true), IDLE_MS)
+      idleTimer.unref()
+    },
+    stop(graceful = false) {
+      clearTimeout(idleTimer)
+      if (!killTimer && child.exitCode === null && child.signalCode === null) {
+        if (graceful) child.stdin.end()
+        else child.kill('SIGTERM')
+        killTimer = setTimeout(() => child.kill('SIGKILL'), 3000)
+        killTimer.unref()
+      }
+      return closed
+    },
+    get stopping() { return Boolean(killTimer) || !child.stdin.writable || child.exitCode !== null || child.signalCode !== null },
+  }
+  workers.set(id, worker)
+  child.stderr.setEncoding('utf8').on('data', part => { stderr = (stderr + part).slice(-2048) })
+  createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', line => worker.onLine?.(line))
+  const fail = err => {
+    worker.onFailure?.(err)
+    worker.stop()
+  }
+  child.once('error', fail)
+  child.stdin.on('error', fail)
+  child.once('close', () => {
+    clearTimeout(idleTimer)
+    clearTimeout(killTimer)
+    if (workers.get(id) === worker) workers.delete(id)
+    worker.onFailure?.(new Error(stderr.trim() || 'Claude Code 进程已退出'))
+    onExit()
+  })
+  return worker
+}
+
 const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i
 
 // Only publish user-visible events. The init message can contain local configuration.
@@ -181,6 +233,12 @@ function fromPanel(req) {
       /^http:\/\/(localhost|127\.0\.0\.1):5173$/.test(origin))
 }
 
+/** True when a parked/live panel `-p` worker still holds this session. */
+export function hasPanelWorker(sessionId) {
+  const worker = workers.get(sessionId)
+  return Boolean(worker && !worker.stopping)
+}
+
 export function decidePermission(req, res) {
   if (!fromPanel(req) || !req.is('application/json')) return res.sendStatus(403)
   const { sessionId, requestId, allow } = req.body || {}
@@ -255,92 +313,91 @@ export async function streamChat(req, res) {
   const closed = new Promise(resolve => { finish = resolve })
   const pending = new Map()
   active.set(sessionId, { response: res, closed, pending })
-  let child
-  let killTimer
-  const stop = () => {
-    if (!child || child.exitCode !== null || child.signalCode !== null) return
-    child.kill('SIGTERM')
-    killTimer = setTimeout(() => child.kill('SIGKILL'), 3000)
-    killTimer.unref()
-  }
+  let worker
+  const stop = () => { worker?.stop() }
   res.once('close', stop)
   try {
     if (!(await stat(cwd)).isDirectory()) throw new Error('项目目录不可用')
-    const bin = await resolveClaudeBin()
-    if (!bin) throw new Error('找不到 Claude Code CLI，请检查本地安装')
-    const existing = await findTranscriptPath(sessionId)
-    if (resume && !existing) throw new Error('找不到要继续的会话记录')
     const ws = workspaceId && (await listWorkspaces()).find(w => w.id === workspaceId)
     const dirs = new Set([...addDirs, ...(ws?.addDirs || []), ...dirsFromFiles(ws?.files)])
     const args = ['-p', '--verbose', '--output-format', 'stream-json', '--include-partial-messages',
       '--input-format', 'stream-json', '--permission-prompt-tool', 'stdio',
       '--permission-mode', perm]
-    args.push(existing ? '--resume' : '--session-id', sessionId)
     if (model) args.push('--model', model)
     if (effortLevel) args.push('--effort', effortLevel)
     for (const dir of dirs) if (dir !== cwd) args.push('--add-dir', dir)
+    const { content } = await buildUserContent(promptText, normalized, cwd, sessionId)
+    // Provider changes written by the settings panel must apply on the next turn.
+    const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+    const settings = await stat(path.join(configDir, 'settings.json')).catch(() => null)
+    const signature = JSON.stringify([cwd, args, settings?.mtimeMs])
+    let cached = workers.get(sessionId)
+    if (cached && (cached.stopping || cached.signature !== signature)) {
+      await cached.stop(true)
+      cached = null
+    }
+    if (!cached) {
+      const existing = await findTranscriptPath(sessionId)
+      if (resume && !existing) throw new Error('找不到要继续的会话记录')
+      const bin = await resolveClaudeBin()
+      if (!bin) throw new Error('找不到 Claude Code CLI，请检查本地安装')
+      if (res.destroyed) return
+      args.push(existing ? '--resume' : '--session-id', sessionId)
+      cached = startWorker(sessionId, signature, bin, args, cwd)
+    }
     if (res.destroyed) return
-    child = spawn(bin, args, { cwd, env: enrichedEnv(), stdio: 'pipe' })
+    worker = cached
+    worker.wake()
+    const child = worker.child
     const send = event => {
       if (!res.destroyed) res.write(JSON.stringify(event) + '\n')
     }
     res.set({ 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' })
     res.flushHeaders()
     const translator = eventTranslator(send)
-    let stderr = ''
-    let parseError
-    child.stderr.setEncoding('utf8').on('data', part => { stderr = (stderr + part).slice(-2048) })
-    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })
-    lines.on('line', line => {
-      if (!line.trim() || parseError) return
-      try {
-        const msg = JSON.parse(line)
-        const id = msg.request_id
-        if (msg.type === 'control_request') {
-          const reply = response => child.stdin.write(JSON.stringify({
-            type: 'control_response', response: { request_id: id, ...response },
-          }) + '\n')
-          if (msg.request.subtype !== 'can_use_tool') {
-            reply({ subtype: 'error', error: 'Unsupported control request' })
-            return
-          }
-          const { tool_name: name, input } = msg.request
-          pending.set(id, allow => {
-            const response = allow ? { behavior: 'allow', updatedInput: input }
-              : { behavior: 'deny', message: '用户拒绝了本次工具调用' }
-            reply({ subtype: 'success', response })
+    await new Promise((resolve, reject) => {
+      worker.onFailure = reject
+      worker.onLine = line => {
+        if (!line.trim()) return
+        try {
+          const msg = JSON.parse(line)
+          const id = msg.request_id
+          if (msg.type === 'control_request') {
+            const reply = response => child.stdin.write(JSON.stringify({
+              type: 'control_response', response: { request_id: id, ...response },
+            }) + '\n')
+            if (msg.request.subtype !== 'can_use_tool') {
+              reply({ subtype: 'error', error: 'Unsupported control request' })
+              return
+            }
+            const { tool_name: name, input } = msg.request
+            pending.set(id, allow => {
+              const response = allow ? { behavior: 'allow', updatedInput: input }
+                : { behavior: 'deny', message: '用户拒绝了本次工具调用' }
+              reply({ subtype: 'success', response })
+              send({ type: 'permissionClosed', id })
+            })
+            send({ type: 'permission', id, name, input })
+          } else if (msg.type === 'control_cancel_request') {
+            pending.delete(id)
             send({ type: 'permissionClosed', id })
-          })
-          send({ type: 'permission', id, name, input })
-        } else if (msg.type === 'control_cancel_request') {
-          pending.delete(id)
-          send({ type: 'permissionClosed', id })
-        } else {
-          translator.read(msg)
-          // Only end the print-mode turn on the top-level result (not nested agent results).
-          if (msg.type === 'result' && !msg.parent_tool_use_id) child.stdin.end()
+          } else {
+            translator.read(msg)
+            if (msg.type === 'result' && !msg.parent_tool_use_id) {
+              translator.finish(0, '')
+              resolve()
+            }
+          }
+        } catch (err) {
+          reject(err)
         }
-      } catch {
-        parseError = new Error('Claude Code 返回了无法解析的消息')
-        stop()
       }
-    })
-    child.stdin.on('error', () => {}) // Startup errors and early exits are handled via close.
-    const { content } = await buildUserContent(
-      promptText,
-      normalized,
-      cwd,
-      sessionId,
-    )
-    const code = await new Promise((resolve, reject) => {
-      child.once('error', reject)
-      child.once('close', resolve)
       child.stdin.write(JSON.stringify({ type: 'user', session_id: sessionId,
         parent_tool_use_id: null, message: { role: 'user', content } }) + '\n')
     })
     if (res.destroyed) return
-    if (parseError) throw parseError
-    translator.finish(code, stderr)
+    worker.park()
+    worker = null
     send({ type: 'done' })
     res.end()
   } catch (err) {
@@ -349,7 +406,7 @@ export async function streamChat(req, res) {
     if (res.headersSent) res.end(JSON.stringify({ type: 'error', error }) + '\n')
     else res.status(400).json({ error })
   } finally {
-    clearTimeout(killTimer)
+    if (worker) await worker.stop()
     res.off('close', stop)
     active.delete(sessionId)
     finish()

@@ -164,9 +164,10 @@ export function detectTerminalApp() {
  * Login-interactive shell that matches typing `claude` in Terminal.app:
  * source profiles, then exec Claude Code (full TUI + colors).
  */
-function buildInteractiveScript({ workDir, commandParts }) {
+function buildInteractiveScript({ workDir, commandParts, windowTitle = 'Claude Code' }) {
   const home = os.homedir()
   const cmd = commandToShell(commandParts)
+  const title = String(windowTitle || 'Claude Code').slice(0, 80)
   return `#!/bin/zsh -l
 # CC Desk → macOS Terminal.app → interactive Claude Code
 export HOME=${shellQuote(home)}
@@ -180,9 +181,50 @@ export CLICOLOR=1
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.npm-global/bin:$HOME/.local/bin:$HOME/bin:$PATH"
 
 cd ${shellQuote(workDir)} || exit 1
-printf '\\033]0;Claude Code\\007'
+printf '\\033]0;%s\\007' ${shellQuote(title)}
 exec ${cmd}
 `
+}
+
+/** Bring Terminal.app forward; prefer a window whose title matches the session. */
+export async function focusExistingTerminal({ sessionId = null, name = null } = {}) {
+  const needles = [sessionId, name, sessionId ? String(sessionId).slice(0, 8) : null]
+    .filter(Boolean)
+    .map(String)
+  const unique = [...new Set(needles)]
+  const listLiteral = unique.map((s) => JSON.stringify(s)).join(', ')
+  const script = `
+set needles to {${listLiteral}}
+tell application "Terminal"
+  activate
+  if (count of needles) is 0 then return "activated"
+  repeat with w in windows
+    set titleText to name of w as text
+    repeat with needle in needles
+      if titleText contains (needle as text) then
+        set index of w to 1
+        set frontmost of w to true
+        return "focused"
+      end if
+    end repeat
+  end repeat
+  return "activated"
+end tell`
+  try {
+    await new Promise((resolve, reject) => {
+      const child = spawn('osascript', ['-e', script], {
+        stdio: 'ignore',
+        detached: true,
+      })
+      child.unref()
+      child.on('error', reject)
+      child.on('spawn', () => resolve())
+      setTimeout(() => resolve(), 600)
+    })
+    return { ok: true, focused: true }
+  } catch (err) {
+    return { ok: false, focused: false, error: String(err?.message || err) }
+  }
 }
 
 function runDetached(bin, args) {
@@ -213,7 +255,12 @@ async function writeTempCommand(scriptBody) {
 /**
  * Open an interactive Claude Code TUI in macOS Terminal.app by default.
  */
-export async function launchInTerminal({ cwd, commandParts, trustCwd = true }) {
+export async function launchInTerminal({
+  cwd,
+  commandParts,
+  trustCwd = true,
+  windowTitle = null,
+}) {
   const workDir = cwd && fs.existsSync(cwd) ? cwd : os.homedir()
   const parts = Array.isArray(commandParts) ? [...commandParts] : ['claude']
   const normalized = [...parts]
@@ -233,6 +280,7 @@ export async function launchInTerminal({ cwd, commandParts, trustCwd = true }) {
   const scriptBody = buildInteractiveScript({
     workDir,
     commandParts: normalized,
+    windowTitle: windowTitle || 'Claude Code',
   })
   const tmp = await writeTempCommand(scriptBody)
   const term = detectTerminalApp()

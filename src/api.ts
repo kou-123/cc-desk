@@ -81,6 +81,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  claudeCliActive: () =>
+    req<{
+      count: number
+      checkedAt: number
+      processes: {
+        pid: number
+        kind: string
+        status: string | null
+        name: string | null
+        cwd: string | null
+        sessionId: string | null
+        source: string
+        command?: string
+      }[]
+    }>('/api/claude-cli/active'),
   workspaces: () => req<{ workspaces: Workspace[] }>('/api/workspaces'),
   createWorkspace: (body: Partial<Workspace>) =>
     req<{ workspace: Workspace }>('/api/workspaces', {
@@ -105,13 +120,18 @@ export const api = {
     permissionMode?: string | null
     effort?: string | null
   }) =>
-    req<{ ok: boolean; cwd: string; command: string; trust?: unknown }>(
-      '/api/launch',
-      {
-        method: 'POST',
-        body: JSON.stringify(body),
-      },
-    ),
+    req<{
+      ok: boolean
+      cwd: string
+      command: string | null
+      trust?: unknown
+      reused?: boolean
+      mode?: 'launch' | 'focus' | 'attach' | 'panel'
+      message?: string
+    }>('/api/launch', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   listFs: (p: string) =>
     req<{ path: string; parent: string; items: FsItem[] }>(
       `/api/fs/list?path=${encodeURIComponent(p)}`,

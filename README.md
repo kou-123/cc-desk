@@ -62,11 +62,12 @@ Claude Code 本身很强，但会话散落在 `~/.claude/projects`，多项目�
 
 - **Sessions** — 自动发现本机 Claude Code 会话；侧栏悬停可新建（`+`）/ 删除（`×`）；空会话直接删，有内容会确认
 - **Transcript preview** — Markdown 渲染、思考折叠（有思考内容时默认展开）；气泡里的图片可点击放大 / 右键或按钮复制；左侧提问目录（每条用户提问一条线，点击跳转）；打开 Terminal 后可「终端预览同步」；工具摘要 / 结果与思考全文不再截断
-- **Workspaces** — 多文件夹项目（Primary + Add dirs），右键编辑；悬停 workspace 行的 `+` 可在该项目新建会话；首页输入框与会话页同宽
-- **Chat** — 面板内提问 / 停止 / 续聊；流式展示思考过程与回复；粘贴或拖入图片与文件（附件缩略图可放大、复制）；权限模式（Ask / Accept edits / Auto / Plan）；模型与思考强度（Effort：Low → Max，传给 CLI `--effort`）
+- **Workspaces** — 多文件夹项目（Primary + Add dirs），右键编辑；悬停 workspace 行的 `+` 可在该项目新建会话；列表按**添加顺序**（最近添加在最上），不会因新建会话而重排
+- **Chat** — 面板内提问 / 停止 / 续聊；同会话 CLI worker 空闲约 **10 分钟**内复用；流式展示思考过程与回复；粘贴或拖入图片与文件；权限模式（Manual / Accept edits / Auto / Plan）；模型与思考强度（Effort → CLI `--effort`）
 - **Sidebar attention** — 其它会话在等工具确认，或后台回合已结束时，该会话旁显示橙色圆点；点进会话后消失
+- **Live CLI count** — 右下角显示本机正在运行的 Claude CLI 数量（约每 10 秒刷新），悬停可看简要列表
 - **Quit guard** — 有回复或工具确认进行中时，关窗口 / ⌘Q 会弹出确认，避免误关中断任务
-- **Terminal launch** — 「打开 Claude Code 命令行」默认拉起 **macOS Terminal.app**，带上当前模型、权限模式与思考强度，并自动信任工作目录
+- **Terminal launch** — **Open Claude Code CLI** 打开 macOS Terminal；若该会话已有交互/后台进程则附着或切到已有窗口，不重复开进程；面板 worker 仍在时也不新开终端
 - **Providers & models** — 本地 `providers.json`；可从本机 CC Switch（`~/.cc-switch`）合并导入；别名映射与 1M 上下文
 - **Settings** — Model、Skills（`~/.claude/skills`）、MCP（`~/.claude.json`，可展开看工具 / 编辑用户级条目）、Appearance 字号、About / CLI 更新
 - **UI** — 深色 / 浅色主题，侧栏搜索，截断路径 hover 提示
@@ -112,14 +113,15 @@ npm run electron:dist
 ## Usage
 
 1. 打开 **CC Desk**，左侧浏览 **Projects** 或底部切到 **Recents**
-2. 点选会话：可在底部输入框继续提问；长会话左侧目录可按提问跳转；需要完整 TUI 时点 **打开 Claude Code 命令行**
+2. 点选会话：可在底部输入框继续提问；长会话左侧目录可按提问跳转；需要完整 TUI 时点 **Open Claude Code CLI**
 3. 输入框右下角可点 **模型名 + 思考强度**，调节 Effort，并切换供应商 / 模型
 4. 拖入 / 粘贴图片后可点缩略图放大或复制；发送后聊天气泡里同样支持
 5. **New chat**，或悬停 workspace 行的 **`+`**，在对应项目下新建会话
 6. 悬停会话行的 **`×`** 删除会话（空会话直接删）；侧栏橙色圆点表示该会话待确认或已在后台跑完
-7. 任务进行中关应用会提示确认
-8. 右键项目 → **Edit project** 管理 Source folders
-9. 齿轮 → **Settings**：Provider / 模型、Skills、MCP、字号、Claude Code 版本
+7. 右下角可查看本机 **CLI** 进程数与 sessions / workspaces 统计
+8. 任务进行中关应用会提示确认
+9. 右键项目 → **Edit project** 管理 Source folders
+10. 齿轮 → **Settings**：Provider / 模型、Skills、MCP、字号、Claude Code 版本
 
 ---
 

@@ -107,6 +107,8 @@ export default function App() {
     return [...drafts.filter(s => !saved.has(s.id)), ...savedSessions]
   }, [drafts, savedSessions])
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [cliActiveCount, setCliActiveCount] = useState<number | null>(null)
+  const [cliActiveTip, setCliActiveTip] = useState('')
   const [query, setQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
   const [rail, setRail] = useState<RailTab>('chats')
@@ -223,6 +225,46 @@ export default function App() {
       showToast(e instanceof Error ? e.message : String(e), true),
     )
   }, [refresh, showToast])
+
+  // Poll how many Claude Code CLI processes are running on this Mac.
+  useEffect(() => {
+    let cancelled = false
+    const load = () => {
+      api
+        .claudeCliActive()
+        .then((data) => {
+          if (cancelled) return
+          setCliActiveCount(data.count)
+          const lines = (data.processes || []).map((p) => {
+            const label =
+              p.name ||
+              p.cwd ||
+              (p.sessionId ? p.sessionId.slice(0, 8) : null) ||
+              `pid ${p.pid}`
+            const kind = p.kind || 'cli'
+            const status = p.status ? ` · ${p.status}` : ''
+            return `${kind}: ${label}${status}`
+          })
+          setCliActiveTip(
+            lines.length
+              ? `本机正在运行的 Claude CLI（约每 10 秒刷新）\n${lines.join('\n')}`
+              : '本机当前没有运行中的 Claude CLI（约每 10 秒刷新）',
+          )
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setCliActiveCount(null)
+            setCliActiveTip('无法读取本机 Claude CLI 进程')
+          }
+        })
+    }
+    load()
+    const timer = window.setInterval(load, 10_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
 
   const projects = useMemo(
     () => buildProjects(sessions, workspaces),
@@ -744,7 +786,7 @@ export default function App() {
     try {
       const p = project || selectedProject
       const prefs = readLaunchPrefs()
-      await api.launch({
+      const launched = await api.launch({
         sessionId: session.id,
         cwd: session.cwd,
         workspaceId: p?.workspace?.id || null,
@@ -757,9 +799,17 @@ export default function App() {
       setSelection({ kind: 'session', id: session.id })
       stickBottomRef.current = true
       lastMetaRef.current = null
-      showToast(
-        `已在 macOS Terminal 打开 Claude Code（完整交互界面）。右侧「终端预览同步」只是把命令行对话同步回本页。`,
-      )
+      if (launched.mode === 'focus') {
+        showToast(launched.message || '已切到已有终端中的 Claude CLI')
+      } else if (launched.mode === 'attach') {
+        showToast(launched.message || '已附着到后台 Claude 会话')
+      } else if (launched.mode === 'panel') {
+        showToast(launched.message || '该会话 CLI 已在面板运行，未新开终端')
+      } else {
+        showToast(
+          '已在 macOS Terminal 打开 Claude Code（完整交互界面）。右侧「终端预览同步」只是把命令行对话同步回本页。',
+        )
+      }
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), true)
     } finally {
@@ -1177,10 +1227,6 @@ export default function App() {
                 )}
                 ?
               </h1>
-              {!selectedProject?.cwd && <p>
-                工作空间 = 一组本地文件夹（Primary + 可选附加目录）。New chat
-                会先选项目或新建工作空间，即可在这里提问。
-              </p>}
               {selectedProject?.cwd && (
                 <ChatComposer
                   key={selectedProject.key}
@@ -1189,25 +1235,6 @@ export default function App() {
                   onToast={showToast}
                 />
               )}
-              <div className="hero-actions">
-                <button
-                  type="button"
-                  className="btn primary"
-                  disabled={busy}
-                  onClick={() => setNewChatOpen(true)}
-                >
-                  New chat
-                </button>
-                {selectedProject && (
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => openEdit(selectedProject)}
-                  >
-                    Edit project
-                  </button>
-                )}
-              </div>
             </div>
           ) : (
             <div className="detail-wrap">
@@ -1224,7 +1251,7 @@ export default function App() {
                       void resumeSession(selectedSession, selectedProject)
                     }
                   >
-                    打开 Claude Code 命令行
+                    Open Claude Code CLI
                   </button>
                   <button
                     type="button"
@@ -1367,7 +1394,20 @@ export default function App() {
           <div className="crumbs">
             This computer › <strong>{crumb}</strong>
           </div>
-          <div>
+          <div
+            className="foot-stats"
+            title={cliActiveTip || undefined}
+          >
+            {cliActiveCount != null ? (
+              <>
+                <span
+                  className={`foot-cli${cliActiveCount > 0 ? ' is-on' : ''}`}
+                >
+                  {cliActiveCount} CLI
+                </span>
+                <span className="foot-sep">·</span>
+              </>
+            ) : null}
             {sessions.length} sessions · {workspaces.length} workspaces
           </div>
         </footer>

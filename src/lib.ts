@@ -71,9 +71,10 @@ export function buildProjects(
     byCwd.get(cwd)!.push(s)
   }
 
+  const autoNodes: ProjectNode[] = []
   for (const [cwd, list] of byCwd) {
     list.sort((a, b) => b.lastActivity - a.lastActivity)
-    nodes.push({
+    autoNodes.push({
       key: `auto:${cwd}`,
       name: basename(cwd) || 'untitled',
       workspace: null,
@@ -82,14 +83,10 @@ export function buildProjects(
       sessions: list,
     })
   }
-
-  nodes.sort((a, b) => {
-    const ta = a.sessions[0]?.lastActivity || a.workspace?.updatedAt || 0
-    const tb = b.sessions[0]?.lastActivity || b.workspace?.updatedAt || 0
-    return tb - ta
-  })
-
-  return nodes
+  // Saved workspaces keep add order (API list is newest-first).
+  // Auto-discovered roots stay after them, A–Z — never bump by chat activity.
+  autoNodes.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+  return [...nodes, ...autoNodes]
 }
 
 export function recentSessions(sessions: Session[], n = 8) {

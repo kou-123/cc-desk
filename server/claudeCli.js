@@ -206,6 +206,81 @@ export async function resolveClaudeBin() {
   return ''
 }
 
+/**
+ * Count Claude Code processes currently running on this machine
+ * (interactive Terminal sessions + background agents).
+ */
+export async function listActiveClaudeCli() {
+  const bin = (await resolveClaudeBin()) || 'claude'
+  const probe = await run(bin, ['agents', '--json'], { timeoutMs: 6000 })
+  let agents = []
+  if (probe.ok || probe.out.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(probe.out.trim() || '[]')
+      if (Array.isArray(parsed)) agents = parsed
+    } catch {
+      /* fall through to ps */
+    }
+  }
+
+  // Also count live OS processes named claude (covers -p one-shots agents may omit).
+  const ps = await run('ps', ['-axo', 'pid=,command='], { timeoutMs: 4000 })
+  const fromPs = []
+  if (ps.ok || ps.out) {
+    for (const line of String(ps.out || '').split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      const m = trimmed.match(/^(\d+)\s+(.+)$/)
+      if (!m) continue
+      const pid = Number(m[1])
+      const command = m[2]
+      if (!Number.isFinite(pid)) continue
+      // Match Claude Code CLI, not Cursor/plugins/rg/our agents probe.
+      if (!/(^|[\\/])claude(\s|$)/.test(command) && !/^claude(\s|$)/.test(command)) {
+        continue
+      }
+      if (/\bagents\b/.test(command) && /\b--json\b/.test(command)) continue
+      if (/Cursor Helper|extension-host|claude-panel/i.test(command)) continue
+      fromPs.push({ pid, command })
+    }
+  }
+
+  const byPid = new Map()
+  for (const a of agents) {
+    const pid = Number(a.pid)
+    if (!Number.isFinite(pid)) continue
+    byPid.set(pid, {
+      pid,
+      kind: a.kind || 'agent',
+      status: a.status || null,
+      name: a.name || null,
+      cwd: a.cwd || null,
+      sessionId: a.sessionId || null,
+      source: 'agents',
+    })
+  }
+  for (const p of fromPs) {
+    if (byPid.has(p.pid)) continue
+    byPid.set(p.pid, {
+      pid: p.pid,
+      kind: /\s-p(\s|$)/.test(p.command) ? 'print' : 'process',
+      status: null,
+      name: null,
+      cwd: null,
+      sessionId: null,
+      source: 'ps',
+      command: p.command,
+    })
+  }
+
+  const processes = [...byPid.values()].sort((a, b) => a.pid - b.pid)
+  return {
+    count: processes.length,
+    processes,
+    checkedAt: Date.now(),
+  }
+}
+
 /** Detect local Claude Code CLI install + version. */
 export async function getClaudeCliInfo() {
   const bin = await resolveClaudeBin()

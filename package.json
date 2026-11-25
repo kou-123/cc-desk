@@ -2,7 +2,7 @@
   "name": "cc-desk",
   "productName": "CC Desk",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Desktop companion for Claude Code sessions, workspaces, and providers",
   "author": "CC Desk",
   "type": "module",
