@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Claude Panel original mark (not Anthropic's official asterisk path) -->
+  <rect width="1024" height="1024" rx="228" fill="#FCF6DC"/>
+  <g transform="translate(512,512)" fill="#C45F40">
+    <rect x="-27" y="-248" width="54" height="496" rx="27"/>
+    <rect x="-248" y="-27" width="496" height="54" rx="27"/>
+    <g transform="rotate(45)">
+      <rect x="-27" y="-248" width="54" height="496" rx="27"/>
+      <rect x="-248" y="-27" width="496" height="54" rx="27"/>
+    </g>
+    <g transform="rotate(22.5)">
+      <rect x="-17" y="-168" width="34" height="336" rx="17"/>
+      <rect x="-168" y="-17" width="336" height="34" rx="17"/>
+    </g>
+    <circle cx="0" cy="0" r="40"/>
+    <circle cx="0" cy="0" r="16" fill="#FCF6DC"/>
+  </g>
+  <!-- Blue differentiation badge -->
+  <circle cx="790" cy="790" r="92" fill="#3B82F6"/>
+  <circle cx="790" cy="790" r="78" fill="#2563EB"/>
+  <g fill="#FFFFFF">
+    <rect x="748" y="758" width="84" height="14" rx="7"/>
+    <rect x="748" y="784" width="60" height="14" rx="7"/>
+    <rect x="748" y="810" width="72" height="14" rx="7"/>
+  </g>
+</svg>
