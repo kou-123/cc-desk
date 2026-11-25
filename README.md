@@ -27,10 +27,17 @@
 | `CC Desk-*-arm64.dmg` | 拖进「应用程序」安装（Apple Silicon） |
 | `CC-Desk-*-mac-arm64.zip` | 解压即得 `CC Desk.app` |
 
-**打开提示：** 当前未做 Apple 公证签名。若提示「无法打开 / 已损坏」：
+**首次打开（重要）：** 当前未加入 Apple 开发者公证，macOS 可能拦截为「已损坏 / 无法验证开发者」。这不是安装坏了，按下面任一方式即可：
 
-1. 右键应用 → **打开** → 仍选择打开；或  
-2. 终端执行：`xattr -cr "/Applications/CC Desk.app"`
+```bash
+# 推荐：去掉隔离标记后再打开
+xattr -cr "/Applications/CC Desk.app"
+open -a "CC Desk"
+```
+
+或：在「应用程序」里对 **CC Desk** **右键 → 打开** → 再点打开。
+
+真正做到「双击无提示」需要 Apple Developer 证书 + 公证（付费账号），本仓库暂未启用。
 
 还需本机已安装 **Claude Code** CLI（`claude` 命令可用）。
 
