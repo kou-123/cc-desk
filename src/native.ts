@@ -53,11 +53,33 @@ export async function pickFolders(
   return []
 }
 
-/** Copy an image URL (e.g. /api/media/...) to the system clipboard. */
+/** Copy an image URL (/api/media, blob:, data:, http…) to the system clipboard. */
 export async function copyImageFromUrl(src: string): Promise<void> {
   const res = await fetch(src)
   if (!res.ok) throw new Error(`Failed to load image (${res.status})`)
-  const blob = await res.blob()
+  let blob = await res.blob()
+
+  // Electron nativeImage is happiest with PNG/JPEG buffers.
+  if (
+    blob.type &&
+    !/^image\/(png|jpe?g)$/i.test(blob.type) &&
+    window.claudePanel?.copyImage
+  ) {
+    const bmp = await createImageBitmap(blob)
+    const canvas = document.createElement('canvas')
+    canvas.width = bmp.width
+    canvas.height = bmp.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Failed to convert image')
+    ctx.drawImage(bmp, 0, 0)
+    blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('PNG encode failed'))),
+        'image/png',
+      )
+    })
+  }
+
   const buf = await blob.arrayBuffer()
 
   if (window.claudePanel?.copyImage) {

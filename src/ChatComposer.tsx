@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  ImageLightbox,
+  copyImageToClipboard,
+} from './ImageLightbox'
 
 import {
   api,
@@ -46,6 +50,7 @@ type Props = {
   status?: string
   onSend: (payload: ComposerPayload) => void
   onStop?: () => void
+  onToast?: (msg: string, error?: boolean) => void
 }
 
 function pickMapping(src: Partial<ClaudeModelMapping>): ClaudeModelMapping {
@@ -117,6 +122,7 @@ export function ChatComposer({
   status,
   onSend,
   onStop,
+  onToast,
 }: Props) {
   const [text, setText] = useState('')
   const [options, setOptions] = useState<ModelOption[]>([])
@@ -135,6 +141,7 @@ export function ChatComposer({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [attachError, setAttachError] = useState('')
   const [dragging, setDragging] = useState(false)
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(
     readStoredPermissionMode,
   )
@@ -392,7 +399,17 @@ export function ChatComposer({
 
   const canSend = !disabled && !running && (!!text.trim() || attachments.length > 0)
 
+  async function copyPreview(src: string) {
+    try {
+      await copyImageToClipboard(src)
+      onToast?.('已复制图片')
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : String(err), true)
+    }
+  }
+
   return (
+    <>
     <form
       className="chat-composer"
       onSubmit={(e) => {
@@ -466,12 +483,33 @@ export function ChatComposer({
             {attachments.map((a) => (
               <li key={a.id} className={`chat-attach-item kind-${a.kind}`}>
                 {a.previewUrl ? (
-                  <img
-                    src={a.previewUrl}
-                    alt=""
-                    className="chat-attach-thumb"
-                    draggable={false}
-                  />
+                  <button
+                    type="button"
+                    className="chat-attach-thumb-btn"
+                    title="点击放大 · 右键复制"
+                    onClick={() => setPreviewSrc(a.previewUrl || null)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      const src = a.previewUrl
+                      if (!src) return
+                      void copyImageToClipboard(src)
+                        .then(() => onToast?.('已复制图片'))
+                        .catch((err) =>
+                          onToast?.(
+                            err instanceof Error ? err.message : String(err),
+                            true,
+                          ),
+                        )
+                    }}
+                  >
+                    <img
+                      src={a.previewUrl}
+                      alt={a.name}
+                      className="chat-attach-thumb"
+                      draggable={false}
+                    />
+                    <span className="chat-attach-zoom-hint">放大</span>
+                  </button>
                 ) : (
                   <span className="chat-attach-badge">
                     {a.kind === 'document' ? 'PDF' : 'FILE'}
@@ -825,5 +863,13 @@ export function ChatComposer({
         </div>
       </div>
     </form>
+    {previewSrc ? (
+      <ImageLightbox
+        src={previewSrc}
+        onClose={() => setPreviewSrc(null)}
+        onCopy={(src) => void copyPreview(src)}
+      />
+    ) : null}
+    </>
   )
 }

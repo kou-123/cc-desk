@@ -6,7 +6,11 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react'
 import { Markdown } from './Markdown'
-import { copyImageFromUrl } from './native'
+import {
+  ImageLightbox,
+  ImageThumbs,
+  copyImageToClipboard,
+} from './ImageLightbox'
 
 export type ChatTool = {
   name: string
@@ -78,7 +82,9 @@ function groupTurns(messages: ChatBlock[]): Turn[] {
 }
 
 function turnMeta(steps: ChatBlock[]) {
-  const last = [...steps].reverse().find((s) => s.kind === 'assistant') || steps[steps.length - 1]
+  const last =
+    [...steps].reverse().find((s) => s.kind === 'assistant') ||
+    steps[steps.length - 1]
   const model = steps.map((s) => s.model).find(Boolean) || null
   const clock = formatClock(last?.timestamp)
   let durationMs: number | null = null
@@ -108,87 +114,6 @@ type Props = {
 }
 
 type ImgMenu = { x: number; y: number; src: string }
-
-async function copyImageToClipboard(src: string) {
-  // Prefer Electron native clipboard when available (more reliable for images).
-  try {
-    await copyImageFromUrl(src)
-    return
-  } catch {
-    /* fall through to web clipboard */
-  }
-  const res = await fetch(src)
-  if (!res.ok) throw new Error('无法读取图片')
-  let blob = await res.blob()
-  if (blob.type && blob.type !== 'image/png') {
-    const bmp = await createImageBitmap(blob)
-    const canvas = document.createElement('canvas')
-    canvas.width = bmp.width
-    canvas.height = bmp.height
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('无法转换图片')
-    ctx.drawImage(bmp, 0, 0)
-    blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('转 PNG 失败'))),
-        'image/png',
-      )
-    })
-  }
-  if (!navigator.clipboard || !window.ClipboardItem) {
-    throw new Error('当前环境不支持复制图片')
-  }
-  await navigator.clipboard.write([
-    new ClipboardItem({ [blob.type || 'image/png']: blob }),
-  ])
-}
-
-function ImageLightbox({
-  src,
-  onClose,
-  onCopy,
-}: {
-  src: string
-  onClose: () => void
-  onCopy: (src: string) => void
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  return (
-    <div
-      className="img-lightbox"
-      role="dialog"
-      aria-modal="true"
-      aria-label="图片预览"
-      onClick={onClose}
-    >
-      <div className="img-lightbox-bar" onClick={(e) => e.stopPropagation()}>
-        <button type="button" className="btn primary" onClick={() => onCopy(src)}>
-          复制图片
-        </button>
-        <button type="button" className="btn" onClick={onClose}>
-          关闭
-        </button>
-      </div>
-      <img
-        src={src}
-        alt="预览"
-        className="img-lightbox-full"
-        onClick={(e) => e.stopPropagation()}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          onCopy(src)
-        }}
-      />
-    </div>
-  )
-}
 
 function WorkStep({ m }: { m: ChatBlock }) {
   const toolCount = m.tools?.length || 0
@@ -228,40 +153,6 @@ function WorkStep({ m }: { m: ChatBlock }) {
         ))}
       </div>
     </details>
-  )
-}
-
-function ImageThumbs({
-  images,
-  onPreview,
-  onMenu,
-}: {
-  images: string[]
-  onPreview: (src: string) => void
-  onMenu: (e: ReactMouseEvent, src: string) => void
-}) {
-  return (
-    <div className="msg-images">
-      {images.map((src, ii) => (
-        <button
-          key={`${src}-${ii}`}
-          type="button"
-          className="msg-thumb"
-          title="点击放大 · 右键复制"
-          onClick={() => onPreview(src)}
-          onContextMenu={(e) => onMenu(e, src)}
-        >
-          <img
-            src={src}
-            alt={`图片 ${ii + 1}`}
-            className="msg-thumb-img"
-            loading="lazy"
-            draggable={false}
-          />
-          <span className="msg-thumb-hint">点击放大</span>
-        </button>
-      ))}
-    </div>
   )
 }
 
@@ -331,7 +222,9 @@ export function MessageList({ messages, onToast }: Props) {
                 ) : null}
                 {m.text ? <div className="msg-plain">{m.text}</div> : null}
               </div>
-              {clock ? <div className="turn-meta turn-meta-user">{clock}</div> : null}
+              {clock ? (
+                <div className="turn-meta turn-meta-user">{clock}</div>
+              ) : null}
             </div>
           )
         }

@@ -608,9 +608,16 @@ export default function App() {
       workspaceId: context?.workspaceId ?? selectedProject?.workspace?.id,
       addDirs: context?.addDirs ?? selectedProject?.addDirs,
       attachments,
+      // Prefer durable data: URLs so previews survive after composer clears
+      // blob: object URLs (click-to-zoom / copy keep working in the bubble).
       previewImages: payload.attachments
-        .filter((a) => a.kind === 'image' && a.previewUrl)
-        .map((a) => a.previewUrl as string),
+        .filter((a) => a.kind === 'image')
+        .map((a) =>
+          a.data
+            ? `data:${a.mime || 'image/png'};base64,${a.data}`
+            : a.previewUrl || '',
+        )
+        .filter(Boolean),
       previewFiles: payload.attachments
         .filter((a) => a.kind !== 'image')
         .map((a) => ({ name: a.name, kind: a.kind })),
@@ -1077,6 +1084,7 @@ export default function App() {
                   key={selectedProject.key}
                   sessionId={null}
                   onSend={sendMessage}
+                  onToast={showToast}
                 />
               )}
               <div className="hero-actions">
@@ -1233,6 +1241,7 @@ export default function App() {
                   }
                   onSend={sendMessage}
                   onStop={() => chat.stop(selectedSession.id)}
+                  onToast={showToast}
                 />
               </div>
             </div>
