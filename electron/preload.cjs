@@ -11,4 +11,7 @@ contextBridge.exposeInMainWorld('claudePanel', {
   selectFolder: (opts) => ipcRenderer.invoke('dialog:openDirectory', opts || {}),
   /** Copy image bytes (ArrayBuffer / number[]) to system clipboard. */
   copyImage: (payload) => ipcRenderer.invoke('clipboard:copyImage', payload || {}),
+  /** Tell main process whether a Claude turn / tool approval is in flight. */
+  setBusy: (busy) => ipcRenderer.send('app:set-busy', Boolean(busy)),
 })
+

@@ -54,9 +54,10 @@ Claude Code 本身很强，但会话散落在 `~/.claude/projects`，多项目�
 ## Features
 
 - **Sessions** — 自动发现本机 Claude Code 会话；侧栏悬停可新建（`+`）/ 删除（`×`）；空会话直接删，有内容会确认
-- **Transcript preview** — Markdown 渲染、思考折叠；气泡里的图片可点击放大 / 右键或按钮复制；打开 Terminal 后可「终端预览同步」
-- **Workspaces** — 多文件夹项目（Primary + Add dirs），右键编辑；悬停 workspace 行的 `+` 可在该项目新建会话
+- **Transcript preview** — Markdown 渲染、思考折叠；气泡里的图片可点击放大 / 右键或按钮复制；左侧提问目录（每条用户提问一条线，点击跳转）；打开 Terminal 后可「终端预览同步」
+- **Workspaces** — 多文件夹项目（Primary + Add dirs），右键编辑；悬停 workspace 行的 `+` 可在该项目新建会话；首页输入框与会话页同宽
 - **Chat** — 面板内提问 / 停止 / 续聊；粘贴或拖入图片与文件（附件缩略图可放大、复制）；权限模式（Ask / Accept edits / Auto / Plan）与模型选择
+- **Quit guard** — 有回复或工具确认进行中时，关窗口 / ⌘Q 会弹出确认，避免误关中断任务
 - **Terminal launch** — 「打开 Claude Code 命令行」默认拉起 **macOS Terminal.app**，带上当前模型与权限模式，并自动信任工作目录
 - **Providers & models** — 本地 `providers.json`；可从本机 CC Switch（`~/.cc-switch`）合并导入；别名映射与 1M 上下文
 - **Settings** — Model、Skills（`~/.claude/skills`）、MCP（`~/.claude.json`，可展开看工具 / 编辑用户级条目）、Appearance 字号、About / CLI 更新
@@ -103,12 +104,13 @@ npm run electron:dist
 ## Usage
 
 1. 打开 **CC Desk**，左侧浏览 **Projects** 或底部切到 **Recents**
-2. 点选会话：可在底部输入框继续提问；需要完整 TUI 时点 **打开 Claude Code 命令行**
+2. 点选会话：可在底部输入框继续提问；长会话左侧目录可按提问跳转；需要完整 TUI 时点 **打开 Claude Code 命令行**
 3. 拖入 / 粘贴图片后可点缩略图放大或复制；发送后聊天气泡里同样支持
 4. **New chat**，或悬停 workspace 行的 **`+`**，在对应项目下新建会话
 5. 悬停会话行的 **`×`** 删除会话（空会话直接删）
-6. 右键项目 → **Edit project** 管理 Source folders
-7. 齿轮 → **Settings**：Provider / 模型、Skills、MCP、字号、Claude Code 版本
+6. 任务进行中关应用会提示确认
+7. 右键项目 → **Edit project** 管理 Source folders
+8. 齿轮 → **Settings**：Provider / 模型、Skills、MCP、字号、Claude Code 版本
 
 ---
 

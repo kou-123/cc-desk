@@ -38,6 +38,8 @@ import {
   IconX,
 } from './icons'
 import { ConfirmDialog } from './ConfirmDialog'
+import { ChatMinimap } from './ChatMinimap'
+import { ErrorBoundary } from './ErrorBoundary'
 import { MessageList, type ChatBlock } from './MessageList'
 import { ChatComposer } from './ChatComposer'
 import { usePanelChat } from './usePanelChat'
@@ -45,6 +47,7 @@ import { SettingsPage } from './SettingsPage'
 import { Tip } from './Tip'
 import { applyFontScale, readFontScale } from './fontScale'
 import { readLaunchPrefs, permissionModeToCli } from './launchPrefs'
+import { setAppBusy } from './native'
 import { applyTheme, readTheme, toggleTheme, type ThemeMode } from './theme'
 
 type Selection =
@@ -280,6 +283,25 @@ export default function App() {
     (historyId === selectedSession?.id ? messages : [])
   const isLive =
     !!selectedSession && liveSessionId === selectedSession.id
+  const chatBusy = useMemo(
+    () => Object.values(chat.turns).some((t) => t.running),
+    [chat.turns],
+  )
+
+  // Warn on window close / Cmd+Q while Claude is still working.
+  useEffect(() => {
+    setAppBusy(chatBusy)
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!chatBusy) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      setAppBusy(false)
+    }
+  }, [chatBusy])
 
   // Auto-expire live sync window
   useEffect(() => {
@@ -1170,17 +1192,29 @@ export default function App() {
                   ) : null}
                 </div>
               </div>
-              <div
-                className="detail-scroll"
-                ref={detailScrollRef}
-                onScroll={(e) => {
-                  const el = e.currentTarget
-                  stickBottomRef.current =
-                    el.scrollHeight - el.scrollTop - el.clientHeight < 96
-                }}
-              >
-                {(visibleMessages.length > 0 || !isDraft) &&
-                  <MessageList messages={visibleMessages} onToast={showToast} />}
+              <div className="detail-body">
+                <ChatMinimap
+                  scrollRef={detailScrollRef}
+                  messages={visibleMessages}
+                />
+                <div
+                  className="detail-scroll"
+                  ref={detailScrollRef}
+                  onScroll={(e) => {
+                    const el = e.currentTarget
+                    stickBottomRef.current =
+                      el.scrollHeight - el.scrollTop - el.clientHeight < 96
+                  }}
+                >
+                  {(visibleMessages.length > 0 || !isDraft) && (
+                    <ErrorBoundary fallbackTitle="会话预览出错">
+                      <MessageList
+                        messages={visibleMessages}
+                        onToast={showToast}
+                      />
+                    </ErrorBoundary>
+                  )}
+                </div>
               </div>
               <div className="detail-composer-dock">
                 {approvalCount > 0 ? (

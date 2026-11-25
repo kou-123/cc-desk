@@ -191,6 +191,18 @@ export function MessageList({ messages, onToast }: Props) {
     setMenu({ x: e.clientX, y: e.clientY, src })
   }
 
+  const userIndexByTurn = useMemo(() => {
+    const map = new Map<number, number>()
+    let n = 0
+    turns.forEach((turn, ti) => {
+      if (turn.type === 'user') {
+        map.set(ti, n)
+        n += 1
+      }
+    })
+    return map
+  }, [turns])
+
   if (!messages.length) {
     return <div className="turn-empty">暂无可读消息预览</div>
   }
@@ -201,8 +213,14 @@ export function MessageList({ messages, onToast }: Props) {
         if (turn.type === 'user') {
           const m = turn.block
           const clock = formatClock(m.timestamp)
+          const userIdx = userIndexByTurn.get(ti) ?? 0
           return (
-            <div key={ti} className="turn turn-user">
+            <div
+              key={ti}
+              className="turn turn-user"
+              data-user-turn={userIdx}
+              id={`user-turn-${userIdx}`}
+            >
               <div className="turn-user-bubble">
                 {m.images && m.images.length > 0 ? (
                   <ImageThumbs

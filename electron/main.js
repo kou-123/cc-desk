@@ -19,8 +19,39 @@ let server = null
 /** @type {BrowserWindow | null} */
 let mainWindow = null
 let booting = false
+/** Renderer reports in-flight Claude chat / tool work. */
+let rendererBusy = false
+/** After user confirms quit while busy — skip further prompts. */
+let allowQuit = false
+let quitPromptOpen = false
+
+async function confirmQuitWhileBusy() {
+  if (quitPromptOpen) return false
+  quitPromptOpen = true
+  try {
+    const win = BrowserWindow.getFocusedWindow() || mainWindow
+    const result = await dialog.showMessageBox(win ?? undefined, {
+      type: 'warning',
+      buttons: ['取消', '退出'],
+      defaultId: 0,
+      cancelId: 0,
+      title: '任务进行中',
+      message: '有任务正在执行',
+      detail:
+        'Claude 仍在生成回复或等待工具确认。现在退出会中断这些任务。\n确定要退出 CC Desk 吗？',
+      noLink: true,
+    })
+    return result.response === 1
+  } finally {
+    quitPromptOpen = false
+  }
+}
 
 function registerIpc() {
+  ipcMain.on('app:set-busy', (_evt, busy) => {
+    rendererBusy = Boolean(busy)
+  })
+
   ipcMain.handle('dialog:openDirectory', async (_evt, opts = {}) => {
     const win = BrowserWindow.getFocusedWindow() || mainWindow
     const multi = opts.multi !== false
@@ -112,6 +143,16 @@ async function createWindow() {
 
     mainWindow.once('ready-to-show', () => mainWindow?.show())
 
+    mainWindow.on('close', (e) => {
+      if (allowQuit || !rendererBusy) return
+      e.preventDefault()
+      void confirmQuitWhileBusy().then((ok) => {
+        if (!ok) return
+        allowQuit = true
+        mainWindow?.close()
+      })
+    })
+
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
       void shell.openExternal(url)
       return { action: 'deny' }
@@ -138,6 +179,7 @@ app.whenReady().then(() => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
+      allowQuit = false
       createWindow().catch(console.error)
     }
   })
@@ -147,10 +189,34 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
-  try {
-    server?.close()
-  } catch {
-    /* ignore */
+app.on('before-quit', (e) => {
+  if (allowQuit) {
+    try {
+      server?.close()
+    } catch {
+      /* ignore */
+    }
+    return
   }
+  if (!rendererBusy) {
+    allowQuit = true
+    try {
+      server?.close()
+    } catch {
+      /* ignore */
+    }
+    return
+  }
+  // Cmd+Q / Dock Quit while a chat is running
+  e.preventDefault()
+  void confirmQuitWhileBusy().then((ok) => {
+    if (!ok) return
+    allowQuit = true
+    try {
+      server?.close()
+    } catch {
+      /* ignore */
+    }
+    app.quit()
+  })
 })

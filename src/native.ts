@@ -17,6 +17,17 @@ type ClaudePanelBridge = {
     data?: ArrayBuffer | number[]
     filePath?: string
   }) => Promise<{ ok: boolean; error?: string }>
+  /** Report in-flight chat so Electron can warn on quit. */
+  setBusy?: (busy: boolean) => void
+}
+
+/** Sync busy flag to Electron main (no-op in browser). */
+export function setAppBusy(busy: boolean) {
+  try {
+    window.claudePanel?.setBusy?.(busy)
+  } catch {
+    /* ignore */
+  }
 }
 
 declare global {
