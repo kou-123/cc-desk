@@ -61,9 +61,9 @@ Claude Code 本身很强，但会话散落在 `~/.claude/projects`，多项目�
 ## Features
 
 - **Sessions** — 自动发现本机 Claude Code 会话；侧栏悬停可新建（`+`）/ 删除（`×`）；空会话直接删，有内容会确认
-- **Transcript preview** — Markdown 渲染、思考折叠；气泡里的图片可点击放大 / 右键或按钮复制；左侧提问目录（每条用户提问一条线，点击跳转）；打开 Terminal 后可「终端预览同步」
+- **Transcript preview** — Markdown 渲染、思考折叠（有思考内容时默认展开）；气泡里的图片可点击放大 / 右键或按钮复制；左侧提问目录（每条用户提问一条线，点击跳转）；打开 Terminal 后可「终端预览同步」；工具摘要 / 结果与思考全文不再截断
 - **Workspaces** — 多文件夹项目（Primary + Add dirs），右键编辑；悬停 workspace 行的 `+` 可在该项目新建会话；首页输入框与会话页同宽
-- **Chat** — 面板内提问 / 停止 / 续聊；粘贴或拖入图片与文件（附件缩略图可放大、复制）；权限模式（Ask / Accept edits / Auto / Plan）；模型与思考强度（Effort：Low → Max，传给 CLI `--effort`）
+- **Chat** — 面板内提问 / 停止 / 续聊；流式展示思考过程与回复；粘贴或拖入图片与文件（附件缩略图可放大、复制）；权限模式（Ask / Accept edits / Auto / Plan）；模型与思考强度（Effort：Low → Max，传给 CLI `--effort`）
 - **Sidebar attention** — 其它会话在等工具确认，或后台回合已结束时，该会话旁显示橙色圆点；点进会话后消失
 - **Quit guard** — 有回复或工具确认进行中时，关窗口 / ⌘Q 会弹出确认，避免误关中断任务
 - **Terminal launch** — 「打开 Claude Code 命令行」默认拉起 **macOS Terminal.app**，带上当前模型、权限模式与思考强度，并自动信任工作目录

@@ -120,7 +120,7 @@ function WorkStep({ m }: { m: ChatBlock }) {
   const thinkCount = m.thinking?.length || 0
   const dur = formatDur(m.thinkingMs || m.durationMs)
   return (
-    <details className="step-fold">
+    <details className="step-fold" open={thinkCount > 0}>
       <summary>
         <span className="work-arrow">▸</span>
         <span className="work-label">{m.label || '思考与工具'}</span>
@@ -248,8 +248,6 @@ export function MessageList({ messages, onToast }: Props) {
         }
 
         const { steps } = turn
-        const workSteps = steps.filter((s) => s.kind === 'work')
-        const textSteps = steps.filter((s) => s.kind === 'assistant')
         const meta = turnMeta(steps)
 
         return (
@@ -257,13 +255,11 @@ export function MessageList({ messages, onToast }: Props) {
             {meta ? <div className="turn-meta">{meta}</div> : null}
 
             <div className="turn-rail">
-              {workSteps.map((m, si) => (
+              {steps.map((m, si) => m.kind === 'work' ? (
                 <div key={`w-${si}`} className="turn-step">
                   <WorkStep m={m} />
                 </div>
-              ))}
-
-              {textSteps.map((m, si) => (
+              ) : (
                 <div key={`a-${si}`} className="turn-reply">
                   {m.images && m.images.length > 0 ? (
                     <ImageThumbs

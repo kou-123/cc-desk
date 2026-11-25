@@ -1383,6 +1383,8 @@ button {
   border: 1px solid var(--line);
 }
 
+.work-thinking pre { max-height: none; }
+
 .tool-name {
   color: var(--claude);
   font-weight: 600;

@@ -28,7 +28,7 @@ type ChatRequest = {
 type Approval = { type: 'permission'; id: string; name: string; input: unknown }
 type Turn = { approvals: Approval[]; messages: ChatBlock[]; running: boolean; status: string }
 type ChatEvent =
-  | { type: 'text' | 'delta'; key: string; text: string }
+  | { type: 'text' | 'delta' | 'thinking' | 'thinkingDelta'; key: string; text: string }
   | { type: 'tool'; key: string; name: string; summary: string }
   | { type: 'toolResult'; key: string; text: string }
   | Approval
@@ -108,7 +108,11 @@ export function usePanelChat(refresh: () => Promise<void>) {
           }
           const index = indices.get(event.key) ?? blocks.length
           indices.set(event.key, index)
-          if (event.type === 'tool') {
+          if (event.type === 'thinking' || event.type === 'thinkingDelta') {
+            const previous = blocks[index]?.thinking?.[0] || ''
+            const text = event.type === 'thinkingDelta' ? previous + event.text : event.text
+            blocks[index] = { kind: 'work', role: 'assistant', label: '思考过程', thinking: [text] }
+          } else if (event.type === 'tool') {
             blocks[index] = { kind: 'work', role: 'assistant', tools: [{ name: event.name, summary: event.summary }] }
           } else if (event.type === 'toolResult') {
             const tool = blocks[index]?.tools?.[0] || { name: 'result', summary: '' }

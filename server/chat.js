@@ -99,39 +99,51 @@ const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i
 
 // Only publish user-visible events. The init message can contain local configuration.
 function eventTranslator(send) {
-  let messageId
-  const streamedText = new Map()
+  const streams = new Map()
+  let sequence = 0
   let hasText = false
   let result
   return {
     read(msg) {
-      if (msg.parent_tool_use_id) return
+      const scope = msg.parent_tool_use_id || 'main'
       const event = msg.event
       if (msg.type === 'stream_event') {
         if (event?.type === 'message_start') {
-          messageId = event.message.id
-          streamedText.clear()
+          streams.set(scope, { id: event.message.id, blocks: new Map() })
         }
-        if (event?.delta?.type === 'text_delta' && messageId) {
-          hasText = true
-          const key = messageId + ':' + event.index
-          streamedText.set(key, (streamedText.get(key) || '') + event.delta.text)
-          send({ type: 'delta', key, text: event.delta.text })
+        const stream = streams.get(scope)
+        if (!stream) return
+        const block = event.content_block
+        const delta = event.delta
+        const kind = block?.type || delta?.type?.replace(/_delta$/, '')
+        if (kind !== 'thinking' && kind !== 'text') return
+        const piece = block?.[kind] ?? delta?.[kind]
+        if (typeof piece !== 'string') return
+        const key = scope + ':' + stream.id + ':' + event.index
+        stream.blocks.set(event.index, { key, kind })
+        if (piece) {
+          if (kind === 'text' && scope === 'main') hasText = true
+          send({ type: kind === 'thinking' ? 'thinkingDelta' : 'delta', key, text: piece })
         }
       }
       if (msg.type === 'assistant') {
-        for (const [index, block] of (msg.message?.content || []).entries()) {
-          if (block.type === 'text' && block.text) {
-            hasText = true
-            // Some CLI versions emit one complete block per assistant event,
-            // even when that block had a different index in the partial stream.
-            const partial = [...streamedText].find(([, text]) => text === block.text)
-            if (partial) streamedText.delete(partial[0])
-            else send({ type: 'text', key: msg.message.id + ':' + index, text: block.text })
+        const stream = streams.get(scope)
+        for (const block of (msg.message?.content || [])) {
+          if (block.type === 'text' || block.type === 'thinking') {
+            // CLI can send one finalized block at a time, without its stream index.
+            const match = stream?.id === msg.message.id
+              ? [...stream.blocks].find(([, item]) => item.kind === block.type)
+              : undefined
+            if (match) stream.blocks.delete(match[0])
+            const text = block[block.type]
+            if (text) {
+              if (block.type === 'text' && scope === 'main') hasText = true
+              send({ type: block.type, key: match?.[1].key || 'complete:' + sequence++, text })
+            }
           }
           if (block.type === 'tool_use') {
             const input = block.input || {}
-            const summary = String(input.description || input.command || input.file_path || input.pattern || '').slice(0, 240)
+            const summary = String(input.description || input.command || input.file_path || input.pattern || '')
             send({ type: 'tool', key: block.id, name: block.name, summary })
           }
         }
@@ -142,10 +154,10 @@ function eventTranslator(send) {
           const text = Array.isArray(block.content)
             ? block.content.map(part => part.text || '').join('\n')
             : String(block.content || '')
-          send({ type: 'toolResult', key: block.tool_use_id, text: text.slice(0, 1200) })
+          send({ type: 'toolResult', key: block.tool_use_id, text })
         }
       }
-      if (msg.type === 'result') {
+      if (msg.type === 'result' && scope === 'main') {
         result = msg
         if (!hasText && !msg.is_error && msg.result) {
           send({ type: 'text', key: 'result', text: msg.result })
@@ -305,7 +317,8 @@ export async function streamChat(req, res) {
           send({ type: 'permissionClosed', id })
         } else {
           translator.read(msg)
-          if (msg.type === 'result') child.stdin.end()
+          // Only end the print-mode turn on the top-level result (not nested agent results).
+          if (msg.type === 'result' && !msg.parent_tool_use_id) child.stdin.end()
         }
       } catch {
         parseError = new Error('Claude Code 返回了无法解析的消息')

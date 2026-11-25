@@ -27,13 +27,6 @@ function truncate(text, n = 120) {
   return `${s.slice(0, n - 1)}…`
 }
 
-/** Keep newlines / markdown structure for chat body. */
-function clip(text, n = 4000) {
-  const s = String(text || '')
-  if (s.length <= n) return s
-  return `${s.slice(0, n - 1)}…`
-}
-
 async function readAliases(projectDir) {
   const aliasPath = path.join(projectDir, '.session-aliases')
   try {
@@ -361,7 +354,7 @@ function contentParts(content, sessionId = '') {
         type: 'tool_use',
         id: c.id || null,
         name: c.name || 'tool',
-        summary: String(summary).slice(0, 240),
+        summary: String(summary),
       })
     } else if (c.type === 'tool_result') {
       let result = ''
@@ -380,7 +373,7 @@ function contentParts(content, sessionId = '') {
       parts.push({
         type: 'tool_result',
         toolUseId: c.tool_use_id || null,
-        text: result.slice(0, 1200),
+        text: result,
       })
     }
   }
@@ -611,7 +604,7 @@ export async function getSessionMessages(sessionId, limit = 120) {
   }
   const flushWork = () => {
     if (!work) return
-    const thinking = work.thinking.map((t) => clip(t, 2500)).filter(Boolean)
+    const thinking = work.thinking.filter(Boolean)
     const tools = work.tools.filter((t) => t.name !== 'result' || t.result)
     if (thinking.length || tools.length) {
       blocks.push({
@@ -711,12 +704,12 @@ export async function getSessionMessages(sessionId, limit = 120) {
       if (Number.isFinite(thinkMs) && thinkMs > 0) work.thinkingMs += thinkMs
       for (const p of parts) {
         const last = work.tools[work.tools.length - 1]
-        if (last && !last.result) last.result = clip(p.text, 800)
+        if (last && !last.result) last.result = p.text
         else {
           work.tools.push({
             name: 'result',
             summary: '',
-            result: clip(p.text, 800),
+            result: p.text,
           })
         }
       }
@@ -774,7 +767,7 @@ export async function getSessionMessages(sessionId, limit = 120) {
       .map((p) => p.text)
       .join('\n')
       .trim()
-    let cleanText = text && !isNoiseText(text) ? clip(text, 12000) : ''
+    let cleanText = text && !isNoiseText(text) ? text : ''
     if (cleanText) {
       const stripped = stripUploadHint(cleanText)
       cleanText = stripped.text
