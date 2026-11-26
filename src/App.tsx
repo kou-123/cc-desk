@@ -1432,16 +1432,14 @@ export default function App() {
             title={cliActiveTip || undefined}
           >
             {cliActiveCount != null ? (
-              <>
-                <span
-                  className={`foot-cli${cliActiveCount > 0 ? ' is-on' : ''}`}
-                >
-                  {cliActiveCount} CLI
-                </span>
-                <span className="foot-sep">·</span>
-              </>
-            ) : null}
-            {sessions.length} sessions · {workspaces.length} workspaces
+              <span
+                className={`foot-cli${cliActiveCount > 0 ? ' is-on' : ''}`}
+              >
+                {cliActiveCount} CLI
+              </span>
+            ) : (
+              <span className="foot-cli">— CLI</span>
+            )}
           </div>
         </footer>
       </main>

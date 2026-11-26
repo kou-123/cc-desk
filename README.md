@@ -62,7 +62,7 @@ Claude Code 本身很强，但会话散落在 `~/.claude/projects`，多项目�
 - **Workspaces** — 多文件夹项目（Primary + Add dirs），右键编辑；悬停 workspace 行的 `+` 可在该项目新建会话；列表按**添加顺序**（最近添加在最上），不会因新建会话而重排
 - **Chat** — 面板内提问 / 停止 / 续聊；同会话 CLI worker 空闲约 **10 分钟**内复用；流式展示思考过程与回复；粘贴或拖入图片与文件；权限模式（Manual / Accept edits / Auto / Plan）；模型与思考强度（Effort → CLI `--effort`）
 - **Sidebar attention** — 其它会话在等工具确认，或后台回合已结束时，该会话旁显示橙色圆点；点进会话后消失
-- **Live CLI count** — 右下角显示本机正在运行的 Claude CLI 数量（约每 10 秒刷新），悬停可看简要列表
+- **Live CLI count** — 右下角只显示本机正在运行的 Claude CLI 数量（约每 10 秒刷新），悬停可看简要列表
 - **Quit guard** — 有回复或工具确认进行中时，关窗口 / ⌘Q 会弹出确认，避免误关中断任务
 - **Terminal launch** — **Open Claude Code CLI** 打开 macOS Terminal；若该会话已有交互/后台进程则附着或切到已有窗口，不重复开进程；面板 worker 仍在时也不新开终端
 - **Providers & models** — 本地 `providers.json`；可从本机 CC Switch（`~/.cc-switch`）合并导入；别名映射与 1M 上下文
@@ -115,7 +115,7 @@ npm run electron:dist
 4. 拖入 / 粘贴图片后可点缩略图放大或复制；发送后聊天气泡里同样支持
 5. **New chat**，或悬停 workspace 行的 **`+`**，在对应项目下新建会话
 6. 悬停会话行的 **`×`** 删除会话（空会话直接删）；侧栏橙色圆点表示该会话待确认或已在后台跑完
-7. 右下角可查看本机 **CLI** 进程数与 sessions / workspaces 统计
+7. 右下角可查看本机正在运行的 **CLI** 数量
 8. 任务进行中关应用会提示确认
 9. 右键项目 → **Edit project** 管理 Source folders
 10. 齿轮 → **Settings**：Provider / 模型、Skills、MCP、字号、Claude Code 版本
