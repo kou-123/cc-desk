@@ -40,11 +40,11 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   sessions: () => req<{ sessions: Session[] }>('/api/sessions'),
-  sessionDetail: (id: string) =>
+  sessionDetail: (id: string, before?: number, signal?: AbortSignal) =>
     req<{
       session: Session
       messages: import('./MessageList').ChatBlock[]
-    }>(`/api/sessions/${id}`),
+    }>(`/api/sessions/${id}${before === undefined ? '' : `?before=${before}`}`, { signal }),
   sessionMeta: (id: string) =>
     req<{
       id: string

@@ -1,5 +1,5 @@
 import cors from 'cors'
-import { decidePermission, hasPanelWorker, streamChat } from './chat.js'
+import { cancelChatRun, listChatRuns, watchChatRun, decidePermission, hasPanelWorker, streamChat } from './chat.js'
 import express from 'express'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -66,6 +66,9 @@ export function createApp({ staticDir } = {}) {
   app.use(express.json({ limit: '48mb' }))
 
   app.post('/api/chat/permission', decidePermission)
+  app.get('/api/chat/runs', listChatRuns)
+  app.get('/api/chat/runs/:id', watchChatRun)
+  app.post('/api/chat/runs/:id/stop', cancelChatRun)
   app.post('/api/chat', streamChat)
 
   app.get('/api/health', (_req, res) => {
@@ -308,7 +311,11 @@ export function createApp({ staticDir } = {}) {
 
   app.get('/api/sessions/:id', async (req, res) => {
     try {
-      const detail = await getSessionMessages(req.params.id)
+      const before = req.query.before === undefined ? null : Number(req.query.before)
+      if (before !== null && (!Number.isSafeInteger(before) || before < 0)) {
+        return res.status(400).json({ error: '无效的历史消息位置' })
+      }
+      const detail = await getSessionMessages(req.params.id, 120, before)
       if (!detail) return res.status(404).json({ error: 'Session not found' })
       res.json(detail)
     } catch (err) {

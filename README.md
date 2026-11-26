@@ -2,7 +2,7 @@
 
 **Desktop companion for [Claude Code](https://docs.anthropic.com/en/docs/claude-code)** — browse sessions, manage workspaces, switch providers, and chat with the local CLI directly in the panel.
 
-选择项目或历史会话即可在面板中提问，实时查看本地 Claude Code 的回复。Enter 发送，Shift+Enter 换行。
+选择项目或历史会话即可在面板中提问，实时查看本地 Claude Code 的回复。Enter 发送，Shift+Enter 换行。长会话先显示最近 120 个消息块，滚到顶部会载入上一页，并保留当前阅读位置。
 
 [![macOS](https://img.shields.io/badge/platform-macOS-black)](https://github.com/kou-123/cc-desk)
 [![Release](https://img.shields.io/github/v/release/kou-123/cc-desk)](https://github.com/kou-123/cc-desk/releases/latest)
@@ -22,10 +22,7 @@
 
 ➡️ **[Latest Release](https://github.com/kou-123/cc-desk/releases/latest)**
 
-| 文件 | 说明 |
-|------|------|
-| `CC Desk-*-arm64.dmg` | 拖进「应用程序」安装（Apple Silicon） |
-| `CC-Desk-*-mac-arm64.zip` | 解压即得 `CC Desk.app` |
+在 Release 的 Assets 中下载 `CC-Desk-*-arm64.dmg`（适用于 Apple Silicon）。打开 DMG，将 **CC Desk** 拖进「应用程序」。
 
 **首次打开（重要）：** 当前未加入 Apple 开发者公证，macOS 可能拦截为「已损坏 / 无法验证开发者」。这不是安装坏了，按下面任一方式即可：
 
@@ -139,7 +136,7 @@ npm run electron:dist
 ## Privacy
 
 - 会话与配置数据都在本机；应用不会上传你的 transcript 或 API Key
-- 仓库已忽略 `data/workspaces.json`、`data/providers.json` 等个人路径与密钥文件
+- 开发时的工作区和 provider 配置保存在本机 `data/` 下。桌面应用从 Electron 用户数据目录读取这些配置。打包时会排除项目的 `data/` 目录，以及名为 `workspaces.json`、`providers.json` 的文件。
 
 ---
 

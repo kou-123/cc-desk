@@ -9,6 +9,7 @@ import {
 } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { hasActiveTurns } from '../server/chat.js'
 import { startServer } from '../server/app.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -144,7 +145,7 @@ async function createWindow() {
     mainWindow.once('ready-to-show', () => mainWindow?.show())
 
     mainWindow.on('close', (e) => {
-      if (allowQuit || !rendererBusy) return
+      if (allowQuit || (!rendererBusy && !hasActiveTurns())) return
       e.preventDefault()
       void confirmQuitWhileBusy().then((ok) => {
         if (!ok) return
@@ -198,7 +199,7 @@ app.on('before-quit', (e) => {
     }
     return
   }
-  if (!rendererBusy) {
+  if (!rendererBusy && !hasActiveTurns()) {
     allowQuit = true
     try {
       server?.close()

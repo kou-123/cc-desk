@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -41,8 +42,10 @@ import { ConfirmDialog } from './ConfirmDialog'
 import { ChatMinimap } from './ChatMinimap'
 import { ErrorBoundary } from './ErrorBoundary'
 import { MessageList, type ChatBlock } from './MessageList'
+import { useOlderMessages } from './useOlderMessages'
+import { ApprovalDetails } from './ApprovalDetails'
 import { ChatComposer } from './ChatComposer'
-import { usePanelChat } from './usePanelChat'
+import { usePanelChat, type RunMeta } from './usePanelChat'
 import { SettingsPage } from './SettingsPage'
 import { Tip } from './Tip'
 import { applyFontScale, readFontScale } from './fontScale'
@@ -114,7 +117,14 @@ export default function App() {
   const [rail, setRail] = useState<RailTab>('chats')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [showAll, setShowAll] = useState<Record<string, boolean>>({})
-  const [selection, setSelection] = useState<Selection>(null)
+  const [selection, setSelection] = useState<Selection>(() => {
+    const id = sessionStorage.getItem('cc-desk.selected-chat')
+    return id ? { kind: 'session', id } : null
+  })
+  useEffect(() => {
+    if (selection?.kind === 'session') sessionStorage.setItem('cc-desk.selected-chat', selection.id)
+    else sessionStorage.removeItem('cc-desk.selected-chat')
+  }, [selection])
   const [messages, setMessages] = useState<ChatBlock[]>([])
   const [historyId, setHistoryId] = useState('')
   const [ctx, setCtx] = useState<Ctx>(null)
@@ -318,11 +328,20 @@ export default function App() {
     return null
   }, [selection, projects, selectedSession])
 
-  const chat = usePanelChat(refresh)
+  const restoreRun = useCallback((run: RunMeta) => {
+    setDrafts(prev => prev.some(s => s.id === run.sessionId) ? prev : [...prev, {
+      id: run.sessionId, cwd: run.cwd, name: null, projectKey: run.cwd, preview: run.prompt || '新对话',
+      messageCount: 0, mtime: run.started, lastActivity: run.started, transcriptPath: '',
+    }])
+  }, [])
+  const chat = usePanelChat(refresh, restoreRun)
   const selectedTurn = selectedSession && chat.turns[selectedSession.id]
   const isDraft = !!selectedSession && !selectedSession.transcriptPath
-  const visibleMessages = selectedTurn?.messages ||
+  const latestMessages = selectedTurn?.messages ||
     (historyId === selectedSession?.id ? messages : [])
+  const { messages: visibleMessages, cursor, loadOlder } = useOlderMessages(
+    selectedSession?.id, latestMessages, detailScrollRef, showToast,
+  )
   const isLive =
     !!selectedSession && liveSessionId === selectedSession.id
   const chatBusy = useMemo(
@@ -379,16 +398,7 @@ export default function App() {
   // Warn on window close / Cmd+Q while Claude is still working.
   useEffect(() => {
     setAppBusy(chatBusy)
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!chatBusy) return
-      e.preventDefault()
-      e.returnValue = ''
-    }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => {
-      window.removeEventListener('beforeunload', onBeforeUnload)
-      setAppBusy(false)
-    }
+    return () => setAppBusy(false)
   }, [chatBusy])
 
   // Auto-expire live sync window
@@ -397,6 +407,10 @@ export default function App() {
     const t = window.setTimeout(() => setLiveSessionId(null), LIVE_SYNC_MS)
     return () => window.clearTimeout(t)
   }, [liveSessionId])
+
+  useLayoutEffect(() => {
+    stickBottomRef.current = true
+  }, [selectedSession?.id])
 
   // Poll transcript meta; refetch messages when file changes
   useEffect(() => {
@@ -411,12 +425,27 @@ export default function App() {
     let cancelled = false
     let timer = 0
     lastMetaRef.current = null
-    stickBottomRef.current = true
+    let previousTail: ChatBlock[] = []
 
     const loadDetail = async () => {
       const detail = await api.sessionDetail(sessionId)
       if (cancelled) return
-      setMessages(detail.messages)
+      let next = detail.messages
+      const last = previousTail.at(-1)?.historyIndex
+      if (last !== undefined && next.length) {
+        // An external CLI may append several pages between two polls.
+        while (next[0].historyIndex! > last + 1) {
+          const older = await api.sessionDetail(sessionId, next[0].historyIndex)
+          if (cancelled) return
+          if (older.messages.at(-1)?.historyIndex !== next[0].historyIndex! - 1) break
+          next = [...older.messages, ...next]
+        }
+        if (next[0].historyIndex! <= last + 1) {
+          next = [...previousTail.filter(b => b.historyIndex! < next[0].historyIndex!), ...next]
+        }
+      }
+      previousTail = next
+      setMessages(next)
       setHistoryId(sessionId)
       if (detail.messages.length && !selectedTurn?.status) chat.clear(sessionId)
       setLastSyncedAt(Date.now())
@@ -739,7 +768,7 @@ export default function App() {
       previewFiles: payload.attachments
         .filter((a) => a.kind !== 'image')
         .map((a) => ({ name: a.name, kind: a.kind })),
-    }, selectedSession ? visibleMessages : [])
+    }, selectedSession ? latestMessages : [])
   }
 
   const confirmNewChat = async (result: NewChatResult) => {
@@ -1310,10 +1339,14 @@ export default function App() {
                   ref={detailScrollRef}
                   onScroll={(e) => {
                     const el = e.currentTarget
+                    if (el.scrollTop <= 1 && cursor) void loadOlder()
                     stickBottomRef.current =
                       el.scrollHeight - el.scrollTop - el.clientHeight < 96
                   }}
                 >
+                  {cursor > 0 && <button className="history-earlier" type="button" onClick={() => void loadOlder()}>
+                    加载更早的消息
+                  </button>}
                   {(visibleMessages.length > 0 || !isDraft) && (
                     <ErrorBoundary fallbackTitle="会话预览出错">
                       <MessageList
@@ -1365,7 +1398,7 @@ export default function App() {
                             ))}
                           </div>
                         </div>
-                        <pre>{JSON.stringify(approval.input, null, 2)}</pre>
+                        <ApprovalDetails preview={approval.preview} input={approval.input} />
                       </section>
                     ))}
                   </div>
@@ -1382,7 +1415,7 @@ export default function App() {
                       historyId !== selectedSession.id)
                   }
                   onSend={sendMessage}
-                  onStop={() => chat.stop(selectedSession.id)}
+                  onStop={() => void chat.stop(selectedSession.id).catch(err => showToast(String(err), true))}
                   onToast={showToast}
                 />
               </div>

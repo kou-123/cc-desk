@@ -1,3 +1,4 @@
+import { approvalPreview } from './approvalPreview.js'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
@@ -6,7 +7,8 @@ import os from 'node:os'
 import { createInterface } from 'node:readline'
 import { enrichedEnv, resolveClaudeBin } from './claudeCli.js'
 import { dirsFromFiles } from './launch.js'
-import { findTranscriptPath } from './sessions.js'
+import { randomUUID } from 'node:crypto'
+import { findTranscriptPath, getSessionMessages } from './sessions.js'
 import { listWorkspaces } from './workspaces.js'
 
 const IMAGE_MIME = new Set([
@@ -158,6 +160,15 @@ function eventTranslator(send) {
   return {
     read(msg) {
       const scope = msg.parent_tool_use_id || 'main'
+      if (msg.type === 'system' && msg.subtype === 'init' && scope === 'main') {
+        send({ type: 'status', text: '正在等待模型回复…' })
+      }
+      if (msg.type === 'system' && msg.subtype === 'api_retry') {
+        const limited = msg.error_status === 429 || msg.error === 'rate_limit'
+        const reason = limited ? '模型服务限流' : '模型请求暂时失败'
+        const attempt = Number.isInteger(msg.attempt) ? `（第 ${msg.attempt} 次）` : ''
+        send({ type: 'status', text: `${reason}，正在重试${attempt}…` })
+      }
       const event = msg.event
       if (msg.type === 'stream_event') {
         if (event?.type === 'message_start') {
@@ -239,6 +250,45 @@ export function hasPanelWorker(sessionId) {
   return Boolean(worker && !worker.stopping)
 }
 
+// Keep each turn independent of its HTTP subscribers. Completed streams remain
+// replayable briefly so a disconnect racing the final event can still recover.
+const runs = new Map()
+
+function subscribe(run, res, offset = 0) {
+  res.set({ 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' })
+  res.flushHeaders()
+  for (let i = offset; i < run.lines.length; i++) res.write(run.lines[i])
+  if (run.finished) return res.end()
+  run.clients.add(res)
+  res.once('close', () => run.clients.delete(res))
+}
+
+export function hasActiveTurns() {
+  return active.size > 0
+}
+
+export function listChatRuns(req, res) {
+  if (!fromPanel(req)) return res.sendStatus(403)
+  res.set('Cache-Control', 'no-store').json([...active.values()].map(run => run.meta))
+}
+
+export function watchChatRun(req, res) {
+  if (!fromPanel(req)) return res.sendStatus(403)
+  const run = runs.get(req.params.id)
+  if (!run) return res.sendStatus(404)
+  const offset = Number(req.query.offset || 0)
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > run.lines.length) return res.sendStatus(400)
+  subscribe(run, res, offset)
+}
+
+export function cancelChatRun(req, res) {
+  if (!fromPanel(req) || !req.is('application/json')) return res.sendStatus(403)
+  const run = runs.get(req.params.id)
+  if (!run) return res.sendStatus(404)
+  if (!run.finished) run.cancel()
+  res.json({ ok: true })
+}
+
 export function decidePermission(req, res) {
   if (!fromPanel(req) || !req.is('application/json')) return res.sendStatus(403)
   const { sessionId, requestId, allow } = req.body || {}
@@ -306,17 +356,32 @@ export async function streamChat(req, res) {
   if (model != null && (typeof model !== 'string' || model.startsWith('-') || /[\s\x00-\x1f]/.test(model))) {
     return res.status(400).json({ error: '无效的模型 ID' })
   }
-  const previous = active.get(sessionId)
-  if (previous?.response.destroyed) await previous.closed
   if (active.has(sessionId)) return res.status(409).json({ error: '当前会话正在生成回复' })
-  let finish
-  const closed = new Promise(resolve => { finish = resolve })
-  const pending = new Map()
-  active.set(sessionId, { response: res, closed, pending })
+  const id = req.body.runId || randomUUID()
+  if (!uuid.test(id) || runs.has(id)) return res.status(409).json({ error: '无效或重复的轮次' })
   let worker
-  const stop = () => { worker?.stop() }
-  res.once('close', stop)
+  let cancelled = false
+  const pending = new Map()
+  const run = {
+    meta: { id, sessionId, cwd, prompt: promptText.slice(0, 120), started: Date.now() },
+    pending, lines: [], clients: new Set(), finished: false,
+    cancel() { cancelled = true; pending.clear(); worker?.stop() },
+  }
+  runs.set(id, run)
+  active.set(sessionId, run)
+  const send = event => {
+    const line = JSON.stringify(event) + '\n'
+    run.lines.push(line)
+    for (const client of run.clients) client.write(line)
+  }
+  subscribe(run, res)
   try {
+    const history = resume ? (await getSessionMessages(sessionId))?.messages || [] : []
+    send({ type: 'initial', messages: [...history, {
+      kind: 'user', role: 'user', text: promptText,
+      images: normalized.filter(a => a.kind === 'image').map(a => `data:${a.mime};base64,${a.data}`),
+      files: normalized.filter(a => a.kind !== 'image').map(({ name, kind }) => ({ name, kind })),
+    }] })
     if (!(await stat(cwd)).isDirectory()) throw new Error('项目目录不可用')
     const ws = workspaceId && (await listWorkspaces()).find(w => w.id === workspaceId)
     const dirs = new Set([...addDirs, ...(ws?.addDirs || []), ...dirsFromFiles(ws?.files)])
@@ -336,24 +401,22 @@ export async function streamChat(req, res) {
       await cached.stop(true)
       cached = null
     }
-    if (!cached) {
+    if (cached) {
+      send({ type: 'status', text: '正在等待模型回复…' })
+    } else {
+      send({ type: 'status', text: '正在启动 Claude CLI…' })
       const existing = await findTranscriptPath(sessionId)
       if (resume && !existing) throw new Error('找不到要继续的会话记录')
       const bin = await resolveClaudeBin()
       if (!bin) throw new Error('找不到 Claude Code CLI，请检查本地安装')
-      if (res.destroyed) return
+      if (cancelled) throw new Error('已停止生成')
       args.push(existing ? '--resume' : '--session-id', sessionId)
       cached = startWorker(sessionId, signature, bin, args, cwd)
     }
-    if (res.destroyed) return
+    if (cancelled) throw new Error('已停止生成')
     worker = cached
     worker.wake()
     const child = worker.child
-    const send = event => {
-      if (!res.destroyed) res.write(JSON.stringify(event) + '\n')
-    }
-    res.set({ 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' })
-    res.flushHeaders()
     const translator = eventTranslator(send)
     await new Promise((resolve, reject) => {
       worker.onFailure = reject
@@ -377,7 +440,11 @@ export async function streamChat(req, res) {
               reply({ subtype: 'success', response })
               send({ type: 'permissionClosed', id })
             })
-            send({ type: 'permission', id, name, input })
+            void approvalPreview(name, input, cwd).catch(() => null).then(preview => {
+              if (pending.has(id) && !cancelled && !run.finished) {
+                send({ type: 'permission', id, name, input, preview })
+              }
+            })
           } else if (msg.type === 'control_cancel_request') {
             pending.delete(id)
             send({ type: 'permissionClosed', id })
@@ -395,20 +462,19 @@ export async function streamChat(req, res) {
       child.stdin.write(JSON.stringify({ type: 'user', session_id: sessionId,
         parent_tool_use_id: null, message: { role: 'user', content } }) + '\n')
     })
-    if (res.destroyed) return
+    if (cancelled) throw new Error('已停止生成')
     worker.park()
     worker = null
     send({ type: 'done' })
-    res.end()
   } catch (err) {
-    if (res.destroyed) return
-    const error = err.message || String(err)
-    if (res.headersSent) res.end(JSON.stringify({ type: 'error', error }) + '\n')
-    else res.status(400).json({ error })
-  } finally {
     if (worker) await worker.stop()
-    res.off('close', stop)
+    send({ type: 'error', error: cancelled ? '已停止生成' : String(err.message || err) })
+  } finally {
+    run.finished = true
+    pending.clear()
     active.delete(sessionId)
-    finish()
+    for (const client of run.clients) client.end()
+    run.clients.clear()
+    setTimeout(() => runs.delete(id), 60000).unref()
   }
 }

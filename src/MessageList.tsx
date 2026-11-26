@@ -19,6 +19,7 @@ export type ChatTool = {
 }
 
 export type ChatBlock = {
+  historyIndex?: number
   kind: 'user' | 'assistant' | 'work'
   role: string
   text?: string
@@ -216,7 +217,8 @@ export function MessageList({ messages, onToast }: Props) {
           const userIdx = userIndexByTurn.get(ti) ?? 0
           return (
             <div
-              key={ti}
+              key={m.historyIndex ?? `live-${ti}`}
+              data-history-index={m.historyIndex}
               className="turn turn-user"
               data-user-turn={userIdx}
               id={`user-turn-${userIdx}`}
@@ -251,16 +253,16 @@ export function MessageList({ messages, onToast }: Props) {
         const meta = turnMeta(steps)
 
         return (
-          <div key={ti} className="turn turn-assistant">
+          <div key={steps[0].historyIndex ?? `live-${ti}`} className="turn turn-assistant">
             {meta ? <div className="turn-meta">{meta}</div> : null}
 
             <div className="turn-rail">
               {steps.map((m, si) => m.kind === 'work' ? (
-                <div key={`w-${si}`} className="turn-step">
+                <div data-history-index={m.historyIndex} key={m.historyIndex ?? `w-${si}`} className="turn-step">
                   <WorkStep m={m} />
                 </div>
               ) : (
-                <div key={`a-${si}`} className="turn-reply">
+                <div data-history-index={m.historyIndex} key={m.historyIndex ?? `a-${si}`} className="turn-reply">
                   {m.images && m.images.length > 0 ? (
                     <ImageThumbs
                       images={m.images}

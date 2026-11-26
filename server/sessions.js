@@ -562,12 +562,28 @@ function shortModel(model) {
   return m.replace(/^claude-/, '').replace(/-\d{8}$/, '')
 }
 
+// Reuse the last parsed transcript while paging through it. A CLI append or
+// file replacement invalidates the index before the next history request.
+let cachedTranscript
+
+function historyPage(session, blocks, before, limit) {
+  const end = Math.min(before ?? blocks.length, blocks.length)
+  const start = Math.max(0, end - limit)
+  return { session, messages: blocks.slice(start, end).map((block, i) => ({
+    ...block, historyIndex: start + i,
+  })) }
+}
+
 /** Build chat blocks: user/assistant text + collapsible work (thinking/tools). */
-export async function getSessionMessages(sessionId, limit = 120) {
+export async function getSessionMessages(sessionId, limit = 120, before = null) {
   const transcriptPath = await findTranscriptPath(sessionId)
   if (!transcriptPath) return null
 
   const st = await fsp.stat(transcriptPath)
+  const version = [transcriptPath, st.ino, st.ctimeMs, st.size].join(':')
+  if (before !== null && cachedTranscript?.version === version) {
+    return historyPage(cachedTranscript.session, cachedTranscript.blocks, before, limit)
+  }
   const peek = await peekSession(transcriptPath)
   const aliases = await readAliases(path.dirname(transcriptPath))
   const hit = {
@@ -585,6 +601,7 @@ export async function getSessionMessages(sessionId, limit = 120) {
   const raw = await fsp.readFile(transcriptPath, 'utf8')
   const blocks = []
   let work = null
+  let lastUser = null
   /** Wall-clock start of current user turn (for duration estimate). */
   let turnStartMs = null
   /** Sum of thinkingDurationMs seen since last user visible message. */
@@ -785,18 +802,18 @@ export async function getSessionMessages(sessionId, limit = 120) {
     if (role === 'user') {
       // Claude Code often re-emits the same turn as `[Image: source: …]`
       // placeholders after the real base64 user message — skip that echo.
-      const prev = [...blocks].reverse().find((b) => b.kind === 'user')
       const imageOnlyEcho = !cleanText && !files.length && images.length > 0
       if (
         imageOnlyEcho &&
-        prev &&
-        (prev.images?.length || 0) >= images.length
+        lastUser &&
+        (lastUser.images?.length || 0) >= images.length
       ) {
         continue
       }
       turnStartMs = tsMs
       thinkingMsAccum = 0
       pushVisible({ role, text: cleanText, images, files, ts })
+      lastUser = blocks.at(-1)
       continue
     }
 
@@ -825,10 +842,8 @@ export async function getSessionMessages(sessionId, limit = 120) {
   }
   flushWork()
 
-  return {
-    session: hit,
-    messages: blocks.slice(-limit),
-  }
+  cachedTranscript = { version, session: hit, blocks }
+  return historyPage(hit, blocks, before, limit)
 }
 
 async function rmSafe(target) {

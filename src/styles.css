@@ -819,7 +819,6 @@ button {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  overflow-anchor: none;
   padding: 16px 36px 28px;
   -webkit-overflow-scrolling: touch;
 }
@@ -4085,4 +4084,21 @@ button {
   overflow-wrap: anywhere;
   font-size: 0.75rem;
   color: var(--muted);
+}
+
+.approval-path, .approval-note, .approval-raw { font-size: .8rem; margin-top: 6px; }
+.approval-path code { overflow-wrap: anywhere; user-select: text; }
+.approval-raw summary { cursor: pointer; color: var(--muted); }
+.tool-approval .approval-command, .tool-approval .approval-diff { margin: 8px 0; max-height: 19vh; color: var(--text); user-select: text; }
+.approval-diff span { display: block; white-space: pre-wrap; }
+.approval-diff .added { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+.approval-diff .removed { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+
+.history-earlier {
+  display: block;
+  margin: 0 auto 12px;
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  cursor: pointer;
 }
