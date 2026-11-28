@@ -832,8 +832,6 @@ export default function App() {
         showToast(launched.message || '已切到已有终端中的 Claude CLI')
       } else if (launched.mode === 'attach') {
         showToast(launched.message || '已附着到后台 Claude 会话')
-      } else if (launched.mode === 'panel') {
-        showToast(launched.message || '该会话 CLI 已在面板运行，未新开终端')
       } else {
         showToast(
           '已在 macOS Terminal 打开 Claude Code（完整交互界面）。右侧「终端预览同步」只是把命令行对话同步回本页。',

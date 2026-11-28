@@ -126,7 +126,7 @@ export const api = {
       command: string | null
       trust?: unknown
       reused?: boolean
-      mode?: 'launch' | 'focus' | 'attach' | 'panel'
+      mode?: 'launch' | 'focus' | 'attach'
       message?: string
     }>('/api/launch', {
       method: 'POST',

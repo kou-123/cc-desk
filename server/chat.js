@@ -244,10 +244,21 @@ function fromPanel(req) {
       /^http:\/\/(localhost|127\.0\.0\.1):5173$/.test(origin))
 }
 
-/** True when a parked/live panel `-p` worker still holds this session. */
-export function hasPanelWorker(sessionId) {
-  const worker = workers.get(sessionId)
-  return Boolean(worker && !worker.stopping)
+// Reserve the session while an idle panel CLI hands its transcript to Terminal.
+const openingTerminal = new Set()
+
+export function reserveTerminal(sessionId) {
+  if (active.has(sessionId) || openingTerminal.has(sessionId)) return false
+  openingTerminal.add(sessionId)
+  return true
+}
+
+export function finishTerminalLaunch(sessionId) {
+  openingTerminal.delete(sessionId)
+}
+
+export async function releaseIdleWorker(sessionId) {
+  await workers.get(sessionId)?.stop(true)
 }
 
 // Keep each turn independent of its HTTP subscribers. Completed streams remain
@@ -356,6 +367,7 @@ export async function streamChat(req, res) {
   if (model != null && (typeof model !== 'string' || model.startsWith('-') || /[\s\x00-\x1f]/.test(model))) {
     return res.status(400).json({ error: '无效的模型 ID' })
   }
+  if (openingTerminal.has(sessionId)) return res.status(409).json({ error: '正在打开该会话的终端' })
   if (active.has(sessionId)) return res.status(409).json({ error: '当前会话正在生成回复' })
   const id = req.body.runId || randomUUID()
   if (!uuid.test(id) || runs.has(id)) return res.status(409).json({ error: '无效或重复的轮次' })
