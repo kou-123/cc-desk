@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { launchInTerminal } from './launch.js'
+import { launchInTerminal, pendingTerminalTty, terminalRegistered } from './launch.js'
 
 export const CLAUDE_UPDATE_CMD =
   'npm install -g @anthropic-ai/claude-code@latest'
@@ -210,7 +210,7 @@ export async function resolveClaudeBin() {
  * Count Claude Code processes currently running on this machine
  * (interactive Terminal sessions + background agents).
  */
-export async function listActiveClaudeCli() {
+export async function listActiveClaudeCli({ requireProcessList = false } = {}) {
   const bin = (await resolveClaudeBin()) || 'claude'
   const probe = await run(bin, ['agents', '--json'], { timeoutMs: 6000 })
   let agents = []
@@ -224,24 +224,27 @@ export async function listActiveClaudeCli() {
   }
 
   // Also count live OS processes named claude (covers -p one-shots agents may omit).
-  const ps = await run('ps', ['-axo', 'pid=,command='], { timeoutMs: 4000 })
+  const ps = await run('ps', ['-axo', 'pid=,tty=,command='], { timeoutMs: 4000 })
+  if (requireProcessList && !ps.ok) throw new Error('无法读取本机 Claude 进程列表')
+  const agentPids = new Set(agents.map(a => Number(a.pid)))
   const fromPs = []
   if (ps.ok || ps.out) {
     for (const line of String(ps.out || '').split('\n')) {
       const trimmed = line.trim()
       if (!trimmed) continue
-      const m = trimmed.match(/^(\d+)\s+(.+)$/)
+      const m = trimmed.match(/^(\d+)\s+(\S+)\s+(.+)$/)
       if (!m) continue
       const pid = Number(m[1])
-      const command = m[2]
+      const device = m[2]
+      const tty = /^(?:tty)?(s\d+)$/.exec(device)
+      const command = m[3]
       if (!Number.isFinite(pid)) continue
       // Match Claude Code CLI, not Cursor/plugins/rg/our agents probe.
-      if (!/(^|[\\/])claude(\s|$)/.test(command) && !/^claude(\s|$)/.test(command)) {
+      if (!agentPids.has(pid) && !/(^|[\\/])claude(\s|$)/.test(command) && !/^claude(\s|$)/.test(command)) {
         continue
       }
       if (/\bagents\b/.test(command) && /\b--json\b/.test(command)) continue
-      if (/Cursor Helper|extension-host|claude-panel/i.test(command)) continue
-      fromPs.push({ pid, command })
+      fromPs.push({ pid, command, tty: tty ? '/dev/tty' + tty[1] : null })
     }
   }
 
@@ -260,14 +263,21 @@ export async function listActiveClaudeCli() {
     })
   }
   for (const p of fromPs) {
-    if (byPid.has(p.pid)) continue
+    const agent = byPid.get(p.pid)
+    if (agent) {
+      agent.tty = p.tty
+      if (/\s(?:-p|--print)(?:\s|$)/.test(p.command)) agent.kind = 'print'
+      if (!agent.sessionId) agent.command = p.command
+      continue
+    }
     byPid.set(p.pid, {
       pid: p.pid,
-      kind: /\s-p(\s|$)/.test(p.command) ? 'print' : 'process',
+      kind: /\s(?:-p|--print)(\s|$)/.test(p.command) ? 'print' : 'process',
       status: null,
       name: null,
       cwd: null,
       sessionId: null,
+      tty: p.tty,
       source: 'ps',
       command: p.command,
     })
@@ -279,6 +289,21 @@ export async function listActiveClaudeCli() {
     processes,
     checkedAt: Date.now(),
   }
+}
+
+export async function sessionCliProcesses(sessionId) {
+  const { processes } = await listActiveClaudeCli({ requireProcessList: true })
+  const matches = processes.filter(p => {
+    if (p.sessionId) return p.sessionId === sessionId
+    const args = String(p.command || '').split(/\s+/)
+    return args.some((arg, i) =>
+      (['--resume', '-r', '--session-id', 'attach'].includes(arg) && args[i + 1] === sessionId) ||
+      arg === '--resume=' + sessionId || arg === '--session-id=' + sessionId)
+  })
+  const interactive = matches.find(p => p.tty && p.kind !== 'print')
+  if (interactive) terminalRegistered(sessionId)
+  const tty = interactive?.tty || await pendingTerminalTty(sessionId)
+  return { matches, interactive, tty }
 }
 
 /** Detect local Claude Code CLI install + version. */

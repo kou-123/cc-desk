@@ -2,7 +2,7 @@
   "name": "cc-desk",
   "productName": "CC Desk",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.6",
   "description": "Desktop companion for Claude Code sessions, workspaces, and providers",
   "author": "CC Desk",
   "type": "module",
@@ -56,6 +56,9 @@
     "icon": "build/icons/icon.png",
     "mac": {
       "category": "public.app-category.developer-tools",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "CC Desk 使用终端打开当前 Claude Code 会话，并切换到对应的标签页。"
+      },
       "icon": "build/icons/icon.icns",
       "target": [
         "dir",

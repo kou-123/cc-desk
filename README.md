@@ -64,7 +64,7 @@ Claude Code 本身很强，但会话散落在 `~/.claude/projects`，多项目�
 - **Sidebar attention** — 其它会话在等工具确认，或后台回合已结束时，该会话旁显示橙色圆点；点进会话后消失
 - **Live CLI count** — 右下角只显示本机正在运行的 Claude CLI 数量（约每 10 秒刷新），悬停可看简要列表
 - **Quit guard** — 有回复或工具确认进行中时，关窗口 / ⌘Q 会弹出确认，避免误关中断任务
-- **Terminal launch** — **Open Claude Code CLI** 打开 macOS Terminal；若该会话已有交互/后台进程则附着或切到已有窗口，不重复开进程；面板 worker 仍在时也不新开终端
+- **Terminal launch** — **Open Claude Code CLI** 打开 macOS Terminal；面板回复结束后可立即带着所选模型和思考强度在终端续聊。再次打开会切到该会话所在的 Terminal 标签页。终端占用该会话时，面板会保留待发送的内容并提供「切到终端」。退出终端里的 Claude 后，重新发送即可接着原会话继续
 - **Providers & models** — 本地 `providers.json`；可从本机 CC Switch（`~/.cc-switch`）合并导入；别名映射与 1M 上下文
 - **Settings** — Model、Skills（`~/.claude/skills`）、MCP（`~/.claude.json`，可展开看工具 / 编辑用户级条目）、Appearance 字号、About / CLI 更新
 - **UI** — 深色 / 浅色主题，侧栏搜索，截断路径 hover 提示

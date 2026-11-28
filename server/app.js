@@ -1,5 +1,5 @@
 import cors from 'cors'
-import { cancelChatRun, listChatRuns, watchChatRun, decidePermission, hasPanelWorker, streamChat } from './chat.js'
+import { cancelChatRun, listChatRuns, watchChatRun, decidePermission, focusSessionTerminal, reserveTerminal, releaseIdleWorker, finishTerminalLaunch, streamChat } from './chat.js'
 import express from 'express'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -44,6 +44,7 @@ import {
   getClaudeCliInfo,
   launchClaudeUpdate,
   listActiveClaudeCli,
+  sessionCliProcesses,
   resolveClaudeBin,
 } from './claudeCli.js'
 import {
@@ -69,6 +70,7 @@ export function createApp({ staticDir } = {}) {
   app.get('/api/chat/runs', listChatRuns)
   app.get('/api/chat/runs/:id', watchChatRun)
   app.post('/api/chat/runs/:id/stop', cancelChatRun)
+  app.post('/api/sessions/:id/focus-terminal', focusSessionTerminal)
   app.post('/api/chat', streamChat)
 
   app.get('/api/health', (_req, res) => {
@@ -404,6 +406,7 @@ export function createApp({ staticDir } = {}) {
   })
 
   app.post('/api/launch', async (req, res) => {
+    let reserved
     try {
       const {
         sessionId = null,
@@ -416,6 +419,13 @@ export function createApp({ staticDir } = {}) {
         permissionMode = null,
         effort = null,
       } = req.body || {}
+
+      if (sessionId) {
+        if (!reserveTerminal(sessionId)) {
+          return res.status(409).json({ error: '该会话正在回复或正在打开终端，请稍后再试' })
+        }
+        reserved = sessionId
+      }
 
       let resolvedCwd = cwd
       let resolvedDirs = [...addDirs]
@@ -458,45 +468,25 @@ export function createApp({ staticDir } = {}) {
 
       // Reuse an already-running CLI for this session instead of spawning another.
       if (sessionId) {
-        const live = await listActiveClaudeCli()
-        const matches = (live.processes || []).filter((p) => {
-          if (p.sessionId && p.sessionId === sessionId) return true
-          const cmd = String(p.command || '')
-          return cmd.includes(sessionId)
-        })
-        const interactive = matches.find(
-          (p) => p.kind === 'interactive' || (p.kind === 'process' && !/\s-p(\s|$)/.test(p.command || '')),
-        )
-        const background = matches.find(
-          (p) => p.kind === 'background' || p.kind === 'agent',
-        )
-        const printLike = matches.find(
-          (p) => p.kind === 'print' || /\s-p(\s|$)/.test(p.command || ''),
-        )
-        const panelWorker = hasPanelWorker(sessionId)
-
-        if (interactive) {
-          const focus = await focusExistingTerminal({
-            sessionId,
-            name: interactive.name,
-          })
+        await releaseIdleWorker(sessionId)
+        const { matches, interactive, tty } = await sessionCliProcesses(sessionId)
+        if (tty && await focusExistingTerminal(tty, !interactive)) {
           return res.json({
-            ok: true,
-            reused: true,
-            mode: 'focus',
-            cwd: interactive.cwd || resolvedCwd,
-            command: interactive.command || `claude --resume ${sessionId}`,
-            message: '已有终端中的 Claude CLI，已切到该窗口（未新开进程）',
-            focus,
-            process: interactive,
+            ok: true, reused: true, mode: 'focus', cwd: interactive?.cwd || resolvedCwd,
+            message: '已切到当前会话所在的终端标签页',
           })
         }
+        if (interactive) {
+          return res.status(409).json({ error: '该会话已在其他终端运行，请切到对应的终端窗口' })
+        }
 
+        const background = matches.find(p => p.kind === 'background' || p.kind === 'agent')
         if (background) {
           const attachTarget = background.name || background.sessionId || sessionId
           const result = await launchInTerminal({
             cwd: background.cwd || resolvedCwd,
-            commandParts: ['claude', 'attach', String(attachTarget)],
+            commandParts: [claudeBin, 'attach', String(attachTarget)],
+            sessionId,
             trustCwd: true,
             windowTitle: `Claude Code · ${String(sessionId).slice(0, 8)}`,
           })
@@ -509,17 +499,8 @@ export function createApp({ staticDir } = {}) {
           })
         }
 
-        if (panelWorker || printLike) {
-          return res.json({
-            ok: true,
-            reused: true,
-            mode: 'panel',
-            cwd: resolvedCwd,
-            command: null,
-            message:
-              '该会话的 Claude CLI 已在面板中运行（空闲约 10 分钟内会保持）。请继续在面板对话，或等进程结束后再开终端。',
-            process: printLike || null,
-          })
+        if (matches.some(p => p.kind === 'print')) {
+          return res.status(409).json({ error: '另一个非交互 CLI 正在使用此会话，请在它结束后再试' })
         }
       }
 
@@ -537,6 +518,7 @@ export function createApp({ staticDir } = {}) {
       const result = await launchInTerminal({
         cwd: resolvedCwd,
         commandParts,
+        sessionId,
         trustCwd: true,
         windowTitle: sessionId
           ? `Claude Code · ${String(sessionId).slice(0, 8)}`
@@ -547,6 +529,8 @@ export function createApp({ staticDir } = {}) {
       res.json({ ...result, reused: false, mode: 'launch' })
     } catch (err) {
       res.status(500).json({ error: String(err.message || err) })
+    } finally {
+      if (reserved) finishTerminalLaunch(reserved)
     }
   })
 

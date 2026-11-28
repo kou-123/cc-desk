@@ -1,8 +1,11 @@
-import { spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+
+const execute = promisify(execFile)
 
 function shellQuote(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`
@@ -19,11 +22,7 @@ export function buildClaudeCommand({
   extraArgs = [],
   claudeBin = 'claude',
 }) {
-  // Prefer the bare `claude` name so a login shell resolves the same binary
-  // the user gets when they type `claude` themselves (PATH + wrappers).
-  const bin =
-    claudeBin && path.isAbsolute(claudeBin) ? 'claude' : claudeBin || 'claude'
-  const parts = [bin]
+  const parts = [claudeBin || 'claude']
   if (sessionId) {
     parts.push('--resume', sessionId)
   }
@@ -186,58 +185,45 @@ exec ${cmd}
 `
 }
 
-/** Bring Terminal.app forward; prefer a window whose title matches the session. */
-export async function focusExistingTerminal({ sessionId = null, name = null } = {}) {
-  const needles = [sessionId, name, sessionId ? String(sessionId).slice(0, 8) : null]
-    .filter(Boolean)
-    .map(String)
-  const unique = [...new Set(needles)]
-  const listLiteral = unique.map((s) => JSON.stringify(s)).join(', ')
-  const script = `
-set needles to {${listLiteral}}
-tell application "Terminal"
-  activate
-  if (count of needles) is 0 then return "activated"
-  repeat with w in windows
-    set titleText to name of w as text
-    repeat with needle in needles
-      if titleText contains (needle as text) then
-        set index of w to 1
-        set frontmost of w to true
-        return "focused"
-      end if
-    end repeat
-  end repeat
-  return "activated"
-end tell`
-  try {
-    await new Promise((resolve, reject) => {
-      const child = spawn('osascript', ['-e', script], {
-        stdio: 'ignore',
-        detached: true,
-      })
-      child.unref()
-      child.on('error', reject)
-      child.on('spawn', () => resolve())
-      setTimeout(() => resolve(), 600)
-    })
-    return { ok: true, focused: true }
-  } catch (err) {
-    return { ok: false, focused: false, error: String(err?.message || err) }
-  }
+// Terminal returns the new tab's TTY before Claude registers with 'claude agents'.
+const startingTabs = new Map()
+
+export function terminalRegistered(sessionId) {
+  startingTabs.delete(sessionId)
 }
 
-function runDetached(bin, args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, {
-      stdio: 'ignore',
-      detached: true,
-    })
-    child.unref()
-    child.on('error', reject)
-    child.on('spawn', () => resolve())
-    setTimeout(() => resolve(), 800)
-  })
+async function findTerminalTab(tty, requireBusy, focus) {
+  const script = `
+on run argv
+  if application "Terminal" is not running then return "missing"
+  tell application "Terminal"
+    repeat with w in windows
+      repeat with t in tabs of w
+        if tty of t is (item 1 of argv) and ((item 2 of argv) is "any" or busy of t) then
+          if (item 3 of argv) is "inspect" then return "found"
+          set selected of t to true
+          set miniaturized of w to false
+          set index of w to 1
+          activate
+          return "found"
+        end if
+      end repeat
+    end repeat
+  end tell
+  return "missing"
+end run`
+  const { stdout } = await execute('osascript', ['-e', script, '--', tty, requireBusy ? 'busy' : 'any', focus ? 'focus' : 'inspect'])
+  return stdout.trim() === 'found'
+}
+
+export function focusExistingTerminal(tty, requireBusy = false) {
+  return findTerminalTab(tty, requireBusy, true)
+}
+
+export async function pendingTerminalTty(sessionId) {
+  const tty = startingTabs.get(sessionId)
+  if (tty && await findTerminalTab(tty, true, false)) return tty
+  return null
 }
 
 async function writeTempCommand(scriptBody) {
@@ -260,13 +246,10 @@ export async function launchInTerminal({
   commandParts,
   trustCwd = true,
   windowTitle = null,
+  sessionId = null,
 }) {
   const workDir = cwd && fs.existsSync(cwd) ? cwd : os.homedir()
-  const parts = Array.isArray(commandParts) ? [...commandParts] : ['claude']
-  const normalized = [...parts]
-  if (normalized[0] && path.isAbsolute(normalized[0])) {
-    normalized[0] = 'claude'
-  }
+  const normalized = Array.isArray(commandParts) ? commandParts : ['claude']
 
   let trust = null
   if (trustCwd) {
@@ -285,10 +268,21 @@ export async function launchInTerminal({
   const tmp = await writeTempCommand(scriptBody)
   const term = detectTerminalApp()
 
-  if (term.id === 'terminal') {
-    // Explicitly open with Terminal.app so we never pick Ghostty as the
-    // default handler for .command files.
-    await runDetached('open', ['-a', 'Terminal', tmp])
+  if (term.id === 'terminal' && sessionId) {
+    const script = `
+on run argv
+  tell application "Terminal"
+    set newTab to do script (quoted form of (item 1 of argv))
+    activate
+    return tty of newTab
+  end tell
+end run`
+    const { stdout } = await execute('osascript', ['-e', script, '--', tmp])
+    const tty = stdout.trim()
+    startingTabs.set(sessionId, tty)
+    setTimeout(() => {
+      if (startingTabs.get(sessionId) === tty) startingTabs.delete(sessionId)
+    }, 10000).unref()
   } else if (term.id === 'iterm' || term.id === 'iterm2') {
     const cmd = commandToShell(normalized)
     const shellLine = `cd ${shellQuote(workDir)} && exec ${cmd}`
@@ -301,12 +295,12 @@ tell application ${JSON.stringify(term.name)}
   end tell
 end tell`
     try {
-      await runDetached('osascript', ['-e', script])
+      await execute('osascript', ['-e', script])
     } catch {
-      await runDetached('open', ['-a', term.name, tmp])
+      await execute('open', ['-a', term.name, tmp])
     }
   } else {
-    await runDetached('open', ['-a', term.name, tmp])
+    await execute('open', ['-a', term.name, tmp])
   }
 
   return {

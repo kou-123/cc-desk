@@ -720,7 +720,7 @@ export default function App() {
     setNewChatOpen(true)
   }
 
-  function sendMessage(payload: {
+  async function sendMessage(payload: {
     prompt: string
     model: string
     permissionMode: string
@@ -734,7 +734,7 @@ export default function App() {
     }[]
   }) {
     const cwd = selectedSession?.cwd || selectedProject?.cwd
-    if (!cwd) return
+    if (!cwd) return 'failed' as const
     const session = selectedSession || newDraft(cwd, selectedProject?.addDirs || [], selectedProject?.workspace?.id)
     const context = draftContext.current.get(session.id)
     stickBottomRef.current = true
@@ -744,7 +744,7 @@ export default function App() {
       kind,
       data,
     }))
-    void chat.send({
+    return chat.send({
       sessionId: session.id,
       prompt: payload.prompt,
       model: payload.model,
@@ -832,8 +832,6 @@ export default function App() {
         showToast(launched.message || '已切到已有终端中的 Claude CLI')
       } else if (launched.mode === 'attach') {
         showToast(launched.message || '已附着到后台 Claude 会话')
-      } else if (launched.mode === 'panel') {
-        showToast(launched.message || '该会话 CLI 已在面板运行，未新开终端')
       } else {
         showToast(
           '已在 macOS Terminal 打开 Claude Code（完整交互界面）。右侧「终端预览同步」只是把命令行对话同步回本页。',

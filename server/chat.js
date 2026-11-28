@@ -5,8 +5,8 @@ import { mkdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { createInterface } from 'node:readline'
-import { enrichedEnv, resolveClaudeBin } from './claudeCli.js'
-import { dirsFromFiles } from './launch.js'
+import { enrichedEnv, resolveClaudeBin, sessionCliProcesses } from './claudeCli.js'
+import { dirsFromFiles, focusExistingTerminal } from './launch.js'
 import { randomUUID } from 'node:crypto'
 import { findTranscriptPath, getSessionMessages } from './sessions.js'
 import { listWorkspaces } from './workspaces.js'
@@ -244,10 +244,22 @@ function fromPanel(req) {
       /^http:\/\/(localhost|127\.0\.0\.1):5173$/.test(origin))
 }
 
-/** True when a parked/live panel `-p` worker still holds this session. */
-export function hasPanelWorker(sessionId) {
-  const worker = workers.get(sessionId)
-  return Boolean(worker && !worker.stopping)
+// Reserve the session while an idle panel CLI hands its transcript to Terminal.
+const openingTerminal = new Set()
+const checkingTerminal = new Set()
+
+export function reserveTerminal(sessionId) {
+  if (active.has(sessionId) || checkingTerminal.has(sessionId) || openingTerminal.has(sessionId)) return false
+  openingTerminal.add(sessionId)
+  return true
+}
+
+export function finishTerminalLaunch(sessionId) {
+  openingTerminal.delete(sessionId)
+}
+
+export async function releaseIdleWorker(sessionId) {
+  await workers.get(sessionId)?.stop(true)
 }
 
 // Keep each turn independent of its HTTP subscribers. Completed streams remain
@@ -299,6 +311,21 @@ export function decidePermission(req, res) {
   pending.delete(requestId)
   answer(allow)
   res.json({ ok: true })
+}
+
+export async function focusSessionTerminal(req, res) {
+  if (!fromPanel(req) || !req.is('application/json')) return res.sendStatus(403)
+  if (!uuid.test(req.params.id)) return res.sendStatus(400)
+  try {
+    const { tty } = await sessionCliProcesses(req.params.id)
+    if (!tty) return res.json({ active: false })
+    if (!await focusExistingTerminal(tty)) {
+      return res.status(409).json({ error: 'Claude 正在其他终端运行，请切换到对应窗口。' })
+    }
+    res.json({ active: true })
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) })
+  }
 }
 
 export async function streamChat(req, res) {
@@ -356,9 +383,22 @@ export async function streamChat(req, res) {
   if (model != null && (typeof model !== 'string' || model.startsWith('-') || /[\s\x00-\x1f]/.test(model))) {
     return res.status(400).json({ error: '无效的模型 ID' })
   }
-  if (active.has(sessionId)) return res.status(409).json({ error: '当前会话正在生成回复' })
+  if (openingTerminal.has(sessionId)) return res.status(409).json({ error: '正在打开该会话的终端' })
+  if (checkingTerminal.has(sessionId) || active.has(sessionId)) return res.status(409).json({ error: '当前会话正在生成回复' })
   const id = req.body.runId || randomUUID()
   if (!uuid.test(id) || runs.has(id)) return res.status(409).json({ error: '无效或重复的轮次' })
+  // Hold the same session against launches and concurrent sends while probing.
+  checkingTerminal.add(sessionId)
+  try {
+    const { tty } = await sessionCliProcesses(sessionId)
+    if (tty) {
+      return res.status(409).json({ code: 'terminal_active', error: '该会话正在终端中使用。退出终端里的 Claude 后即可继续发送。' })
+    }
+  } catch (err) {
+    return res.status(503).json({ error: '无法检查会话的终端状态：' + err.message })
+  } finally {
+    checkingTerminal.delete(sessionId)
+  }
   let worker
   let cancelled = false
   const pending = new Map()
