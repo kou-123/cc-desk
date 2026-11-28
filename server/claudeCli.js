@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { launchInTerminal } from './launch.js'
+import { launchInTerminal, pendingTerminalTty, terminalRegistered } from './launch.js'
 
 export const CLAUDE_UPDATE_CMD =
   'npm install -g @anthropic-ai/claude-code@latest'
@@ -210,7 +210,7 @@ export async function resolveClaudeBin() {
  * Count Claude Code processes currently running on this machine
  * (interactive Terminal sessions + background agents).
  */
-export async function listActiveClaudeCli() {
+export async function listActiveClaudeCli({ requireProcessList = false } = {}) {
   const bin = (await resolveClaudeBin()) || 'claude'
   const probe = await run(bin, ['agents', '--json'], { timeoutMs: 6000 })
   let agents = []
@@ -225,6 +225,7 @@ export async function listActiveClaudeCli() {
 
   // Also count live OS processes named claude (covers -p one-shots agents may omit).
   const ps = await run('ps', ['-axo', 'pid=,tty=,command='], { timeoutMs: 4000 })
+  if (requireProcessList && !ps.ok) throw new Error('无法读取本机 Claude 进程列表')
   const agentPids = new Set(agents.map(a => Number(a.pid)))
   const fromPs = []
   if (ps.ok || ps.out) {
@@ -271,7 +272,7 @@ export async function listActiveClaudeCli() {
     }
     byPid.set(p.pid, {
       pid: p.pid,
-      kind: /\s-p(\s|$)/.test(p.command) ? 'print' : 'process',
+      kind: /\s(?:-p|--print)(\s|$)/.test(p.command) ? 'print' : 'process',
       status: null,
       name: null,
       cwd: null,
@@ -288,6 +289,21 @@ export async function listActiveClaudeCli() {
     processes,
     checkedAt: Date.now(),
   }
+}
+
+export async function sessionCliProcesses(sessionId) {
+  const { processes } = await listActiveClaudeCli({ requireProcessList: true })
+  const matches = processes.filter(p => {
+    if (p.sessionId) return p.sessionId === sessionId
+    const args = String(p.command || '').split(/\s+/)
+    return args.some((arg, i) =>
+      (['--resume', '-r', '--session-id', 'attach'].includes(arg) && args[i + 1] === sessionId) ||
+      arg === '--resume=' + sessionId || arg === '--session-id=' + sessionId)
+  })
+  const interactive = matches.find(p => p.tty && p.kind !== 'print')
+  if (interactive) terminalRegistered(sessionId)
+  const tty = interactive?.tty || await pendingTerminalTty(sessionId)
+  return { matches, interactive, tty }
 }
 
 /** Detect local Claude Code CLI install + version. */

@@ -30,6 +30,7 @@ export type ApprovalPreview =
   | { kind: 'command'; cwd: string; explicitCwd: boolean; command: string }
   | { kind: 'file'; file: string; note: string; lines: string[] }
 type Approval = { type: 'permission'; id: string; name: string; input: unknown; preview?: ApprovalPreview | null }
+export type SendResult = 'sent' | 'terminal' | 'failed'
 type Turn = { approvals: Approval[]; messages: ChatBlock[]; running: boolean; status: string }
 type ChatEvent =
   | { type: 'text' | 'delta' | 'thinking' | 'thinkingDelta'; key: string; text: string }
@@ -90,17 +91,19 @@ export function usePanelChat(refresh: () => Promise<void>, restore: (meta: RunMe
     })
   }
 
-  async function send(request: ChatRequest, history: ChatBlock[]) {
+  function send(request: ChatRequest, history: ChatBlock[]): Promise<SendResult> {
     const run = { id: crypto.randomUUID(), sessionId: request.sessionId, cwd: request.cwd,
       prompt: request.prompt.slice(0, 120), started: Date.now() }
-    return follow(run, [...history, {
-      kind: 'user', role: 'user', text: request.prompt, images: request.previewImages, files: request.previewFiles,
-    }], request)
+    return new Promise((resolve, reject) => {
+      void follow(run, [...history, {
+        kind: 'user', role: 'user', text: request.prompt, images: request.previewImages, files: request.previewFiles,
+      }], request, resolve).catch(reject)
+    })
   }
 
-  async function follow(run: RunMeta, blocks: ChatBlock[], request?: ChatRequest) {
+  async function follow(run: RunMeta, blocks: ChatBlock[], request?: ChatRequest, onAdmission?: (result: SendResult) => void) {
     const id = run.sessionId
-    if (controllers.current.has(id)) return
+    if (controllers.current.has(id)) return onAdmission?.('failed')
     const controller = new AbortController()
     controllers.current.set(id, { controller, runId: run.id })
     sessionStorage.setItem(rememberedKey, JSON.stringify([...remembered().filter(r => r.sessionId !== id), run]))
@@ -111,7 +114,9 @@ export function usePanelChat(refresh: () => Promise<void>, restore: (meta: RunMe
       setTurns(prev => ({ ...prev, [id]: turn }))
     }
     let phase = request ? '正在准备请求…' : '正在恢复对话…'
-    publish(true, phase)
+    if (!request) publish(true, phase)
+    let occupied = false
+    let accepted = false
     let status = ''
     let expired = false
     try {
@@ -132,9 +137,16 @@ export function usePanelChat(refresh: () => Promise<void>, restore: (meta: RunMe
             if (response.status === 404 && ++missing < 3) throw new TypeError('等待轮次连接')
             expired = response.status === 404 && !body
             const detail = await response.json().catch(() => ({}))
+            if (response.status === 409 && detail.code === 'terminal_active') {
+              occupied = true
+              onAdmission?.('terminal')
+              return
+            }
             throw new Error(detail.error || '轮次已结束，可从会话历史查看记录')
           }
           if (!response.body) throw new Error('无法读取回复流')
+          accepted = true
+          onAdmission?.('sent')
           publish(true, phase)
           const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
           let buffer = ''
@@ -185,6 +197,7 @@ export function usePanelChat(refresh: () => Promise<void>, restore: (meta: RunMe
     } catch (err) {
       status = controller.signal.aborted ? '已停止生成' : (err instanceof Error ? err.message : String(err))
     } finally {
+      if (!accepted && !occupied) onAdmission?.('failed')
       if (!controller.signal.aborted && controllers.current.get(id)?.runId === run.id) {
         sessionStorage.setItem(rememberedKey, JSON.stringify(remembered().filter(r => r.id !== run.id)))
         if (expired) {
@@ -194,7 +207,10 @@ export function usePanelChat(refresh: () => Promise<void>, restore: (meta: RunMe
             delete next[id]
             return next
           })
-        } else publish(false, status)
+        } else if (!occupied) {
+          if (request && !accepted) blocks = blocks.slice(0, -1)
+          publish(false, status)
+        }
         controllers.current.delete(id)
         await refresh().catch(() => {})
       }

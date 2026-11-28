@@ -1,5 +1,5 @@
 import cors from 'cors'
-import { cancelChatRun, listChatRuns, watchChatRun, decidePermission, reserveTerminal, releaseIdleWorker, finishTerminalLaunch, streamChat } from './chat.js'
+import { cancelChatRun, listChatRuns, watchChatRun, decidePermission, focusSessionTerminal, reserveTerminal, releaseIdleWorker, finishTerminalLaunch, streamChat } from './chat.js'
 import express from 'express'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -9,7 +9,6 @@ import {
   buildClaudeCommand,
   dirsFromFiles,
   focusExistingTerminal,
-  startingTerminalTty,
   launchInTerminal,
 } from './launch.js'
 import {
@@ -45,6 +44,7 @@ import {
   getClaudeCliInfo,
   launchClaudeUpdate,
   listActiveClaudeCli,
+  sessionCliProcesses,
   resolveClaudeBin,
 } from './claudeCli.js'
 import {
@@ -70,6 +70,7 @@ export function createApp({ staticDir } = {}) {
   app.get('/api/chat/runs', listChatRuns)
   app.get('/api/chat/runs/:id', watchChatRun)
   app.post('/api/chat/runs/:id/stop', cancelChatRun)
+  app.post('/api/sessions/:id/focus-terminal', focusSessionTerminal)
   app.post('/api/chat', streamChat)
 
   app.get('/api/health', (_req, res) => {
@@ -468,15 +469,7 @@ export function createApp({ staticDir } = {}) {
       // Reuse an already-running CLI for this session instead of spawning another.
       if (sessionId) {
         await releaseIdleWorker(sessionId)
-        const live = await listActiveClaudeCli()
-        const matches = (live.processes || []).filter((p) => {
-          if (p.sessionId) return p.sessionId === sessionId
-          const args = String(p.command || '').split(/\s+/)
-          return args.some((arg, i) =>
-            ['--resume', '-r', '--session-id'].includes(arg) && args[i + 1] === sessionId)
-        })
-        const interactive = matches.find(p => p.tty && p.kind !== 'print')
-        const tty = interactive?.tty || startingTerminalTty(sessionId)
+        const { matches, interactive, tty } = await sessionCliProcesses(sessionId)
         if (tty && await focusExistingTerminal(tty, !interactive)) {
           return res.json({
             ok: true, reused: true, mode: 'focus', cwd: interactive?.cwd || resolvedCwd,

@@ -45,6 +45,8 @@ export const api = {
       session: Session
       messages: import('./MessageList').ChatBlock[]
     }>(`/api/sessions/${id}${before === undefined ? '' : `?before=${before}`}`, { signal }),
+  focusSessionTerminal: (id: string) =>
+    req<{ active: boolean }>(`/api/sessions/${id}/focus-terminal`, { method: 'POST', body: '{}' }),
   sessionMeta: (id: string) =>
     req<{
       id: string

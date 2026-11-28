@@ -35,6 +35,8 @@ import {
 } from './permissionModes'
 import { filterSlashCommands, slashQuery } from './slashCommands'
 
+import type { SendResult } from './usePanelChat'
+
 const preference = 'cc-desk.chat-model'
 
 type ModelOption = { value: string; label: string }
@@ -58,7 +60,7 @@ type Props = {
   running?: boolean
   disabled?: boolean
   status?: string
-  onSend: (payload: ComposerPayload) => void
+  onSend: (payload: ComposerPayload) => Promise<SendResult>
   onStop?: () => void
   onToast?: (msg: string, error?: boolean) => void
 }
@@ -134,6 +136,8 @@ export function ChatComposer({
   onStop,
   onToast,
 }: Props) {
+  const [submitting, setSubmitting] = useState(false)
+  const [terminalBusy, setTerminalBusy] = useState(false)
   const [text, setText] = useState('')
   const [options, setOptions] = useState<ModelOption[]>([])
   const [providers, setProviders] = useState<ClaudeProvider[]>([])
@@ -413,22 +417,39 @@ export function ChatComposer({
     }
   }
 
-  function submit() {
+  async function submit() {
     const prompt = text.trim()
-    if (running || disabled || (!prompt && !attachments.length)) return
-    onSend({
-      prompt,
-      model,
-      permissionMode,
-      effort,
-      attachments: [...attachments],
-    })
-    setText('')
-    setAttachments([])
-    setAttachError('')
+    if (running || submitting || disabled || (!prompt && !attachments.length)) return
+    setSubmitting(true)
+    try {
+      const result = await onSend({ prompt, model, permissionMode, effort, attachments: [...attachments] })
+      setTerminalBusy(result === 'terminal')
+      if (result === 'sent') {
+        setText(current => current === text ? '' : current)
+        setAttachments(current => current.filter(a => !attachments.some(sent => sent.id === a.id)))
+        setAttachError('')
+      }
+    } catch (err) {
+      onToast?.(String(err), true)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
-  const canSend = !disabled && !running && (!!text.trim() || attachments.length > 0)
+  async function focusTerminal() {
+    if (!sessionId) return
+    try {
+      const result = await api.focusSessionTerminal(sessionId)
+      if (!result.active) {
+        setTerminalBusy(false)
+        onToast?.('终端里的 Claude 已退出，可以发送了')
+      }
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : String(err), true)
+    }
+  }
+
+  const canSend = !disabled && !submitting && !running && (!!text.trim() || attachments.length > 0)
 
   async function copyPreview(src: string) {
     try {
@@ -448,7 +469,13 @@ export function ChatComposer({
         submit()
       }}
     >
-      {status && (
+      {terminalBusy && (
+        <div className="chat-status" role="status">
+          该会话正在终端中使用。退出终端里的 Claude 后即可继续发送。{' '}
+          <button type="button" className="btn" onClick={() => void focusTerminal()}>切到终端</button>
+        </div>
+      )}
+      {status && !terminalBusy && (
         <div className="chat-status" role="status">
           {status}
         </div>

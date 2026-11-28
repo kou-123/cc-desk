@@ -720,7 +720,7 @@ export default function App() {
     setNewChatOpen(true)
   }
 
-  function sendMessage(payload: {
+  async function sendMessage(payload: {
     prompt: string
     model: string
     permissionMode: string
@@ -734,7 +734,7 @@ export default function App() {
     }[]
   }) {
     const cwd = selectedSession?.cwd || selectedProject?.cwd
-    if (!cwd) return
+    if (!cwd) return 'failed' as const
     const session = selectedSession || newDraft(cwd, selectedProject?.addDirs || [], selectedProject?.workspace?.id)
     const context = draftContext.current.get(session.id)
     stickBottomRef.current = true
@@ -744,7 +744,7 @@ export default function App() {
       kind,
       data,
     }))
-    void chat.send({
+    return chat.send({
       sessionId: session.id,
       prompt: payload.prompt,
       model: payload.model,

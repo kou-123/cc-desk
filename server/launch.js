@@ -188,11 +188,11 @@ exec ${cmd}
 // Terminal returns the new tab's TTY before Claude registers with 'claude agents'.
 const startingTabs = new Map()
 
-export function startingTerminalTty(sessionId) {
-  return startingTabs.get(sessionId)
+export function terminalRegistered(sessionId) {
+  startingTabs.delete(sessionId)
 }
 
-export async function focusExistingTerminal(tty, requireBusy = false) {
+async function findTerminalTab(tty, requireBusy, focus) {
   const script = `
 on run argv
   if application "Terminal" is not running then return "missing"
@@ -200,19 +200,30 @@ on run argv
     repeat with w in windows
       repeat with t in tabs of w
         if tty of t is (item 1 of argv) and ((item 2 of argv) is "any" or busy of t) then
+          if (item 3 of argv) is "inspect" then return "found"
           set selected of t to true
           set miniaturized of w to false
           set index of w to 1
           activate
-          return "focused"
+          return "found"
         end if
       end repeat
     end repeat
   end tell
   return "missing"
 end run`
-  const { stdout } = await execute('osascript', ['-e', script, '--', tty, requireBusy ? 'busy' : 'any'])
-  return stdout.trim() === 'focused'
+  const { stdout } = await execute('osascript', ['-e', script, '--', tty, requireBusy ? 'busy' : 'any', focus ? 'focus' : 'inspect'])
+  return stdout.trim() === 'found'
+}
+
+export function focusExistingTerminal(tty, requireBusy = false) {
+  return findTerminalTab(tty, requireBusy, true)
+}
+
+export async function pendingTerminalTty(sessionId) {
+  const tty = startingTabs.get(sessionId)
+  if (tty && await findTerminalTab(tty, true, false)) return tty
+  return null
 }
 
 async function writeTempCommand(scriptBody) {
